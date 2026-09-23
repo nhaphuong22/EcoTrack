@@ -1,0 +1,16 @@
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: true
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://127.0.0.1:3000"
+
+data:
+  sample_data_path: "data/sample_bdg2_energy.json"
+  building_id: "office_tower_01"
+  default_timezone: "UTC"
+
+tariff:
+  default_rate_vnd: 3100
+  default_rate_usd: 0.125

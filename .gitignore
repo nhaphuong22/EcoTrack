@@ -1,0 +1,39 @@
+# 1. Bảo mật & Biến môi trường (Chặn ở mọi thư mục)
+**/.env
+**/.env.*
+!**/.env.example
+*.pem
+*.key
+
+# 2. Python & Machine Learning
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+*.pkl
+*.joblib
+*.h5
+*.pt
+
+# 3. Frontend & Node.js
+node_modules/
+**/node_modules/
+dist/
+build/
+.npm
+
+# 4. Dữ liệu nặng
+data/raw/
+*.csv
+*.zip
+
+# 5. Hệ thống, IDE & AI Agents Cache
+.vscode/
+.idea/
+.DS_Store
+.agent/
+.agents/
+.claude/
+_bmad-output/test-artifacts/

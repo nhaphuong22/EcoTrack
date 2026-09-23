@@ -1,0 +1,20 @@
+xgboost:
+  n_estimators: 150
+  learning_rate: 0.05
+  max_depth: 6
+  subsample: 0.8
+  colsample_bytree: 0.8
+  random_state: 42
+  target_column: "meter_reading_kwh"
+  forecast_horizon_hours: 24
+  confidence_interval: 0.95
+
+isolation_forest:
+  n_estimators: 150
+  contamination: 0.04
+  max_samples: "auto"
+  random_state: 42
+  thresholds:
+    low: 0.65
+    medium: 0.75
+    critical: 0.85
