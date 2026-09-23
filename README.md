@@ -12,7 +12,7 @@
 
 ### Bước 1: Clone và cấu hình môi trường
 ```bash
-git clone <repo-url>
+git clone https://github.com/nhaphuong22/EcoTrack.git
 cd EcoTrack
 
 # Tạo file .env cho backend từ mẫu
@@ -41,6 +41,13 @@ docker-compose up --build
 ### Backend (Python FastAPI)
 ```bash
 cd backend
+
+# Tạo và kích hoạt môi trường ảo Python
+python -m venv venv
+# Kích hoạt trên Windows (PowerShell): .\venv\Scripts\Activate.ps1
+# Kích hoạt trên Windows (CMD):        venv\Scripts\activate.bat
+# Kích hoạt trên Linux / macOS:        source venv/bin/activate
+
 pip install -r requirements.txt
 cp .env.example .env          # Điền API key nếu có
 uvicorn src.main:app --reload --port 8000
@@ -99,6 +106,23 @@ EcoTrack Monorepo
 | **Thành viên 3** | `backend/src/models/anomaly_isolation_forest/` — Isolation Forest & Thresholding |
 | **Thành viên 4** | `backend/src/agent/` + `backend/src/api/` — LLM Agent & FastAPI Backend |
 | **Thành viên 5** | `frontend/src/` — React Dashboard & Copilot UI |
+
+---
+
+## 🌿 Quy trình làm việc nhóm với Git (Git Workflow)
+
+- **Nhánh `main`**: Chỉ lưu code ổn định nhất để demo / nộp bài.
+- **Nhánh `develop`**: Nhánh tích hợp chính của cả nhóm trong suốt quá trình phát triển.
+- **Quy tắc tạo branch**: Nhánh tính năng luôn tạo từ `develop` theo định dạng:
+  ```bash
+  git checkout develop
+  git pull origin develop
+  git checkout -b feature/<tên-thành-viên>-<tính-năng>
+  ```
+- **Quy trình Pull Request (PR)**:
+  - Tuyệt đối **không** push trực tiếp lên `main` hoặc `develop`.
+  - Luôn mở **Pull Request (PR)** vào nhánh `develop`.
+  - Cần ít nhất **1 thành viên trong nhóm review** và chấp thuận trước khi merge.
 
 ---
 
