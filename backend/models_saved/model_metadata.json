@@ -1,0 +1,42 @@
+{
+  "dataset_rows": 17520,
+  "train_rows": 14016,
+  "test_rows": 3504,
+  "xgb_features": [
+    "air_temperature",
+    "hour",
+    "dayofweek",
+    "is_weekend",
+    "hour_sin",
+    "hour_cos",
+    "lag_1h",
+    "lag_24h"
+  ],
+  "iso_features": [
+    "meter_reading",
+    "air_temperature",
+    "hour",
+    "dayofweek",
+    "is_weekend",
+    "hour_sin",
+    "hour_cos",
+    "lag_1h",
+    "lag_24h"
+  ],
+  "xgboost_metrics": {
+    "rmse_kwh": 74.02,
+    "mae_kwh": 39.63,
+    "mape_percent": 8.04,
+    "r2_score": 0.9785,
+    "target_mape_met": true
+  },
+  "isolation_forest_metrics": {
+    "contamination": 0.03,
+    "total_test_samples": 3504,
+    "anomalies_detected": 137,
+    "anomaly_percentage": 3.91,
+    "anomaly_score_min": -0.1672,
+    "anomaly_score_max": 0.0699,
+    "anomaly_score_mean": -0.0887
+  }
+}
