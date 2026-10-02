@@ -24,11 +24,20 @@ from src.models.anomaly_service import (
 
 @pytest.fixture
 def clean_data_sample():
-    """Reads first 50 rows of office_building_clean.csv."""
+    """Reads first 50 rows of office_building_clean.csv or generates fallback."""
     backend_dir = Path(__file__).resolve().parents[1]
     csv_path = backend_dir / "data" / "processed" / "office_building_clean.csv"
-    assert csv_path.exists(), f"Processed CSV not found at: {csv_path}"
-    return pd.read_csv(csv_path, nrows=50)
+    if csv_path.exists():
+        return pd.read_csv(csv_path, nrows=50)
+
+    # Fallback in fresh CI/CD if CSV is not checked into git
+    timestamps = pd.date_range("2026-01-01 00:00:00", periods=50, freq="1h")
+    return pd.DataFrame({
+        "timestamp": timestamps.strftime("%Y-%m-%d %H:%M:%S"),
+        "meter_reading": [240.0 + (i % 24) * 8.0 for i in range(50)],
+        "air_temperature": [20.0 + (i % 24) * 0.4 for i in range(50)],
+    })
+
 
 
 @pytest.fixture
