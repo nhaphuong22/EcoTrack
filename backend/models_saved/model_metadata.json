@@ -1,0 +1,116 @@
+{
+  "dataset": {
+    "source": "Building Data Genome 2 (BDG2)",
+    "building_id": "Hog_office_Betsy",
+    "primary_use": "Office",
+    "total_clean_samples": 17520,
+    "date_range": {
+      "start": "2016-01-02 00:00:00",
+      "end": "2017-12-31 23:00:00"
+    },
+    "split": {
+      "strategy": "Time-Series Split (Chronological, No Shuffle)",
+      "train_ratio": 0.8,
+      "test_ratio": 0.2,
+      "train_samples": 14016,
+      "train_range": {
+        "start": "2016-01-02 00:00:00",
+        "end": "2017-08-07 23:00:00"
+      },
+      "test_samples": 3504,
+      "test_range": {
+        "start": "2017-08-08 00:00:00",
+        "end": "2017-12-31 23:00:00"
+      }
+    },
+    "features": {
+      "cyclical": [
+        "hour_sin",
+        "hour_cos"
+      ],
+      "temporal": [
+        "hour",
+        "dayofweek",
+        "is_weekend"
+      ],
+      "lag": [
+        "lag_1h",
+        "lag_24h"
+      ],
+      "exogenous": [
+        "air_temperature"
+      ]
+    }
+  },
+  "xgboost_forecaster": {
+    "model_type": "XGBRegressor",
+    "hyperparameters": {
+      "n_estimators": 350,
+      "max_depth": 4,
+      "learning_rate": 0.05,
+      "subsample": 0.85,
+      "colsample_bytree": 0.85,
+      "random_state": 42
+    },
+    "feature_importance": {
+      "air_temperature": 0.0859,
+      "hour": 0.0044,
+      "dayofweek": 0.0084,
+      "is_weekend": 0.0054,
+      "hour_sin": 0.0054,
+      "hour_cos": 0.0156,
+      "lag_1h": 0.8527,
+      "lag_24h": 0.022
+    },
+    "metrics_test": {
+      "MAE": 39.63,
+      "RMSE": 74.02,
+      "R2": 0.9785,
+      "MAPE_pct": 8.04
+    }
+  },
+  "isolation_forest_anomaly_detector": {
+    "model_type": "IsolationForest",
+    "hyperparameters": {
+      "n_estimators": 150,
+      "contamination": 0.03,
+      "max_samples": "auto",
+      "random_state": 42
+    },
+    "test_evaluation": {
+      "test_total_samples": 3504,
+      "anomalies_detected": 137,
+      "anomaly_rate_pct": 3.91,
+      "normal_samples": 3367,
+      "decision_score_min": -0.0699,
+      "decision_score_max": 0.1672,
+      "decision_score_mean": 0.0887
+    },
+    "severity_tiers": {
+      "CRITICAL_OR_HIGH": "decision_score <= -0.05 hoặc residual > 60 kWh",
+      "MEDIUM": "-0.05 < decision_score <= -0.02 hoặc residual > 35 kWh",
+      "LOW": "decision_score > -0.02"
+    }
+  },
+  "scenarios": {
+    "hvac_overrun": {
+      "description": "HVAC chạy quá tải ban đêm (22:00 - 05:00)",
+      "time_window": "2016-01-04 22:00:00 to 2016-01-05 05:00:00",
+      "duration_hours": 8,
+      "baseline_kwh": "220.47 - 268.08 kWh",
+      "actual_spike_kwh": "748.13 - 762.18 kWh (~750 kWh)",
+      "excess_consumption_kwh": 4056.2
+    },
+    "peak_spike": {
+      "description": "Phụ tải tăng vọt vào khung giờ cao điểm biểu giá EVN",
+      "time_windows": [
+        "2016-01-05 10:00:00 to 11:00:00",
+        "2016-01-05 18:00:00 to 19:00:00"
+      ],
+      "duration_hours": 4,
+      "baseline_kwh": "265.20 - 322.12 kWh",
+      "actual_spike_kwh": "2857.56 - 2890.60 kWh (~2,850 kWh)",
+      "excess_consumption_kwh": 10283.4
+    }
+  }
+}
