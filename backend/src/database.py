@@ -43,9 +43,10 @@ def _build_engine():
                 pool_pre_ping=True,
                 pool_size=10,
                 max_overflow=20,
+                connect_args={"connect_timeout": 3},
             )
             # Test quick connection with a low timeout to fail fast if DB is down locally
-            with eng.connect() as conn:
+            with eng.connect():
                 pass
         logger.info("Successfully connected to database: %s", target_url.split("@")[-1] if "@" in target_url else target_url)
         return eng
