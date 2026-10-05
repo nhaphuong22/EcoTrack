@@ -30,9 +30,11 @@ def _build_engine():
     gracefully falls back to local SQLite to ensure the backend remains operational.
     """
     target_url = DATABASE_URL
-    # Normalize postgres:// scheme if provided by some cloud providers
+    # Normalize postgres:// and postgresql:// schemes to use psycopg2 driver
     if target_url.startswith("postgres://"):
-        target_url = target_url.replace("postgres://", "postgresql://", 1)
+        target_url = target_url.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif target_url.startswith("postgresql://") and not target_url.startswith("postgresql+"):
+        target_url = target_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
     try:
         if target_url.startswith("sqlite"):
