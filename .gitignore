@@ -12,10 +12,13 @@ __pycache__/
 venv/
 .venv/
 env/
+**/venv/
 *.pkl
 *.joblib
 *.h5
 *.pt
+*.db
+*.sqlite3
 
 # 3. Frontend & Node.js
 node_modules/
@@ -25,6 +28,7 @@ build/
 .npm
 
 # 4. Dữ liệu nặng
+/data/
 data/raw/
 *.csv
 *.zip
