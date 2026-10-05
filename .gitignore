@@ -37,6 +37,7 @@ data/raw/
 .vscode/
 .idea/
 .DS_Store
+~$*
 .agent/
 .agents/
 .claude/

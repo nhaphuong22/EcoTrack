@@ -1,0 +1,142 @@
+[
+  {
+    "id": "CS-01",
+    "name": "Overnight Chiller Bypass Damper Stuck Open",
+    "vietnamese_name": "Sự cố kẹt van bypass chiller xuyên đêm (Hao hụt ngoài giờ)",
+    "subsystem": "HVAC Chiller Plant & AHU",
+    "building_id": "Hog_office_Betsy",
+    "timestamp": "2026-09-19T23:00:00Z",
+    "operational_context": {
+      "day_of_week": "Saturday",
+      "hour": 23,
+      "building_status": "Unoccupied",
+      "outdoor_temperature_c": 24.2,
+      "relative_humidity_pct": 78.5
+    },
+    "telemetry_data": {
+      "actual_kwh": 107.5,
+      "predicted_baseline_kwh": 42.0,
+      "delta_residual_kwh": 65.5,
+      "anomaly_score": 0.88,
+      "severity": "CRITICAL"
+    },
+    "ground_truth_root_cause": "Van bypass damper tại tháp giải nhiệt bị kẹt ở trạng thái mở 78% dẫn tới chiller không tự động ngắt theo lịch trình off-hours của tòa nhà vào đêm thứ Bảy.",
+    "ideal_remediation_actions": [
+      "Kiểm tra actuator và van damper gió tươi/bypass tại buồng kỹ thuật AHU tầng 12.",
+      "Hủy chế độ Manual Override trên bộ điều khiển DDC BMS.",
+      "Cài đặt lại ngưỡng tự động ngắt (interlock) theo lịch trình ngày nghỉ cuối tuần."
+    ],
+    "test_prompts": [
+      "Giải thích nguyên nhân sự cố bất thường lúc 23h đêm thứ Bảy?",
+      "Tại sao lượng điện chiller tăng đột biến ngoài giờ vận hành?",
+      "What caused the Saturday 23:00 anomaly in Chiller Loop?"
+    ],
+    "expected_tools": ["get_anomalies", "calculate_waste_cost"],
+    "ground_truth_keywords": ["chiller", "damper", "ngoài giờ", "unoccupied", "bất thường", "kẹt", "lãng phí"]
+  },
+  {
+    "id": "CS-02",
+    "name": "Peak Cooling Surge & Compressor Short-Cycling during High Tariff Window",
+    "vietnamese_name": "Đột biến phụ tải đỉnh giờ cao điểm do chu kỳ nén ngắn (EVN Peak Tariff)",
+    "subsystem": "HVAC Compressor & Cooling Tower",
+    "building_id": "Hog_office_Betsy",
+    "timestamp": "2026-09-22T14:00:00Z",
+    "operational_context": {
+      "day_of_week": "Tuesday",
+      "hour": 14,
+      "building_status": "Occupied (Peak Office Shift)",
+      "outdoor_temperature_c": 34.8,
+      "relative_humidity_pct": 65.0
+    },
+    "telemetry_data": {
+      "actual_kwh": 265.0,
+      "predicted_baseline_kwh": 180.0,
+      "delta_residual_kwh": 85.0,
+      "anomaly_score": 0.92,
+      "severity": "CRITICAL"
+    },
+    "ground_truth_root_cause": "Máy nén điều hòa trung tâm bị hiện tượng chu kỳ ngắn (short cycling) kết hợp nhiệt độ ngoài trời đạt đỉnh 34.8°C khiến công suất điện tức thời tăng vọt trong khung giờ cao điểm giá điện.",
+    "ideal_remediation_actions": [
+      "Nâng dải setpoint nhiệt độ phòng từ 23.5°C lên 25.0°C để giảm tải đỉnh tức thời.",
+      "Thực hiện chiến lược Pre-cooling (làm mát sớm) từ 11:30 đến 13:00 trước giờ cao điểm.",
+      "Kiểm tra áp suất gas và cảm biến nhiệt độ hồi của máy nén chiller."
+    ],
+    "test_prompts": [
+      "Tại sao chiều thứ Ba phụ tải điện lại tăng đột biến vượt đỉnh dự báo?",
+      "Làm thế nào để giảm phụ tải đỉnh trong giờ cao điểm chiều nay?",
+      "Phân tích sự cố tăng tải 85 kW vào lúc 14h."
+    ],
+    "expected_tools": ["get_anomalies", "query_forecast_summary", "calculate_waste_cost"],
+    "ground_truth_keywords": ["đỉnh", "peak", "cao điểm", "nhiệt độ", "pre-cooling", "máy nén", "setpoint"]
+  },
+  {
+    "id": "CS-03",
+    "name": "Zone Lighting & Fan Coil Unit Baseload Leakage after Weekend Overtime",
+    "vietnamese_name": "Rò rỉ phụ tải nền do chiếu sáng và FCU quên tắt sau ca làm thêm cuối tuần",
+    "subsystem": "Lighting Circuits & Fan Coil Units (FCU)",
+    "building_id": "Hog_office_Betsy",
+    "timestamp": "2026-09-27T03:00:00Z",
+    "operational_context": {
+      "day_of_week": "Sunday",
+      "hour": 3,
+      "building_status": "Unoccupied",
+      "outdoor_temperature_c": 23.5,
+      "relative_humidity_pct": 82.0
+    },
+    "telemetry_data": {
+      "actual_kwh": 80.0,
+      "predicted_baseline_kwh": 35.0,
+      "delta_residual_kwh": 45.0,
+      "anomaly_score": 0.74,
+      "severity": "HIGH"
+    },
+    "ground_truth_root_cause": "Hệ thống chiếu sáng khu vực văn phòng mở và 12 dàn quạt FCU tại tầng 5-6 bị để quên hoạt động liên tục sau ca làm việc thêm giờ (overtime) tối thứ Bảy.",
+    "ideal_remediation_actions": [
+      "Kích hoạt cảm biến chuyển động (PIR sensors) để tự động tắt đèn sau 15 phút không có người.",
+      "Gửi lệnh ngắt điện khu vực qua tủ điều khiển tầng (Sub-distribution Board).",
+      "Gửi thông báo nhắc nhở quản lý khu vực tầng 5 và 6 về quy định tiết kiệm điện."
+    ],
+    "test_prompts": [
+      "Tại sao rạng sáng Chủ nhật phụ tải nền cao hơn bình thường 45 kWh?",
+      "Kiểm tra các khu vực rò rỉ điện ngoài giờ cuối tuần?",
+      "Đánh giá chi phí lãng phí rạng sáng Chủ nhật."
+    ],
+    "expected_tools": ["get_anomalies", "calculate_waste_cost"],
+    "ground_truth_keywords": ["chiếu sáng", "quên tắt", "cuối tuần", "phụ tải nền", "lãng phí", "fcu", "tầng"]
+  },
+  {
+    "id": "CS-04",
+    "name": "Pre-Cooling Scheduling Inefficiency and Tariff Cost Exposure",
+    "vietnamese_name": "Lập lịch làm mát trước không hiệu quả gây rủi ro phạt công suất đỉnh",
+    "subsystem": "HVAC Master Scheduler",
+    "building_id": "Hog_office_Betsy",
+    "timestamp": "2026-09-28T09:00:00Z",
+    "operational_context": {
+      "day_of_week": "Monday",
+      "hour": 9,
+      "building_status": "Occupied (Morning Ramp)",
+      "outdoor_temperature_c": 31.0,
+      "relative_humidity_pct": 68.0
+    },
+    "telemetry_data": {
+      "actual_kwh": 195.0,
+      "predicted_baseline_kwh": 145.0,
+      "delta_residual_kwh": 50.0,
+      "anomaly_score": 0.71,
+      "severity": "HIGH"
+    },
+    "ground_truth_root_cause": "Khởi động đồng thời tất cả các tổ máy chiller vào đúng 08:30 sáng khi nhân viên vào làm, thay vì khởi động so le và làm mát sớm dẫn đến dòng khởi động và công suất tức thời tăng vọt.",
+    "ideal_remediation_actions": [
+      "Áp dụng thuật toán khởi động so le (Staggered Startup) cách nhau 15 phút giữa các tổ máy.",
+      "Bắt đầu chu trình làm mát sớm từ 07:00 khi giá điện sinh hoạt thấp.",
+      "Tích hợp dự báo tải XGBoost vào bộ lập lịch tự động của BMS."
+    ],
+    "test_prompts": [
+      "Dự báo phụ tải hôm nay cho thấy đỉnh điện vào lúc nào và cần làm gì?",
+      "Làm sao để tránh tăng vọt công suất đỉnh vào sáng đầu tuần?",
+      "Đề xuất lịch làm mát tối ưu theo dự báo tải."
+    ],
+    "expected_tools": ["query_forecast_summary", "query_metrics"],
+    "ground_truth_keywords": ["dự báo", "đỉnh", "khởi động", "so le", "làm mát sớm", "pre-cooling", "biểu giá"]
+  }
+]

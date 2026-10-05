@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from typing import Dict, Any, List, Tuple
 from src.agent.prompts import SYSTEM_PROMPT
 from src.agent.tools.energy_tools import (
@@ -8,6 +9,7 @@ from src.agent.tools.energy_tools import (
     query_forecast_summary,
     calculate_waste_cost
 )
+from src.agent.experiment_logger import experiment_logger
 
 class CopilotOrchestrator:
     def __init__(self):
@@ -19,8 +21,11 @@ class CopilotOrchestrator:
         Processes a chat turn using Cloud LLM or rule-based tool dispatch fallback.
         Returns: (assistant_response_markdown, list_of_tools_called)
         """
+        start_time = time.time()
         tools_called = []
         msg_lower = user_message.lower()
+        model_name = "heuristic_engine"
+        reply = ""
 
         # Step 1: Tool dispatch decision
         metrics_data = None
@@ -63,12 +68,14 @@ class CopilotOrchestrator:
                     contents=prompt
                 )
                 if response and response.text:
-                    return response.text, tools_called or ["domain_knowledge"]
+                    reply = response.text
+                    model_name = "gemini-1.5-flash"
+                    tools_called = tools_called or ["domain_knowledge"]
             except Exception as e:
                 # Log error and fallback to structured reasoning
                 pass
 
-        if self.openai_key:
+        if not reply and self.openai_key:
             try:
                 from openai import OpenAI
                 client = OpenAI(api_key=self.openai_key)
@@ -88,12 +95,28 @@ class CopilotOrchestrator:
                     ]
                 )
                 if response.choices:
-                    return response.choices[0].message.content, tools_called or ["domain_knowledge"]
+                    reply = response.choices[0].message.content
+                    model_name = "gpt-4o-mini"
+                    tools_called = tools_called or ["domain_knowledge"]
             except Exception:
                 pass
 
         # Step 3: Heuristic domain reasoning fallback (guarantees system runs smoothly out of the box)
-        return self._generate_heuristic_response(user_message, metrics_data, anomalies_data, forecast_data, tools_called)
+        if not reply:
+            reply, tools_called = self._generate_heuristic_response(user_message, metrics_data, anomalies_data, forecast_data, tools_called)
+            model_name = "heuristic_engine"
+
+        # Log turn for academic evaluation
+        latency_ms = (time.time() - start_time) * 1000
+        experiment_logger.log_interaction(
+            user_message=user_message,
+            response_text=reply,
+            tools_called=tools_called,
+            latency_ms=latency_ms,
+            model_name=model_name
+        )
+
+        return reply, tools_called
 
     def _generate_heuristic_response(self, query: str, metrics, anomalies, forecast, tools_called) -> Tuple[str, List[str]]:
         msg = query.lower()
