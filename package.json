@@ -1,0 +1,13 @@
+{
+  "name": "ecotrack",
+  "version": "1.0.0",
+  "private": true,
+  "description": "EcoTrack - Smart Building Energy Management System",
+  "scripts": {
+    "dev": "docker compose up -d db && npx concurrently -n \"BACKEND,FRONTEND\" -c \"green,cyan\" \"python -m uvicorn src.main:app --app-dir backend --reload --port 8000\" \"npm run dev --prefix frontend\"",
+    "dev:all": "docker compose up",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "test": "pytest backend"
+  }
+}
