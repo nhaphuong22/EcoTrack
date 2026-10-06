@@ -17,3 +17,19 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #475569;
 }
+
+/* Animate only the incident halo so chart geometry stays stable. */
+.anomaly-marker__halo {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: anomaly-ping 1.35s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes anomaly-ping {
+  0% { opacity: 0.75; transform: scale(0.55); }
+  75%, 100% { opacity: 0; transform: scale(1.65); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anomaly-marker__halo { animation: none; opacity: 0.35; }
+}

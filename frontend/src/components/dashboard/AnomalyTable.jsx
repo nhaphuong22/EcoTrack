@@ -86,10 +86,11 @@ export default function AnomalyTable({ anomalies, loading, onAskCopilot }) {
                 id={`ask-copilot-${anom.id}`}
                 onClick={() => onAskCopilot?.(anom)}
                 className="flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2.5 py-1.5 text-[11px] font-medium text-sky-400 opacity-0 transition hover:bg-sky-500/20 group-hover:opacity-100"
-                title="Hỏi Copilot về sự cố này"
+                title="Chẩn đoán sự cố này bằng Copilot"
+                aria-label={`Chẩn đoán bằng Copilot cho sự cố ${anom.id}`}
               >
                 <MessageSquare size={12} />
-                Copilot
+                Chẩn đoán bằng Copilot
               </button>
             </div>
           );

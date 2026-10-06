@@ -1,0 +1,33 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\title{EcoTrack: An Intelligent Building Energy Forecasting, Anomaly Detection, and Diagnostic Copilot Platform}
+\author{\IEEEauthorblockN{Author One, Author Two, Author Three, Author Four, Author Five}\\\IEEEauthorblockA{Institution Name\\contact@example.com}}
+\begin{document}
+\maketitle
+\begin{abstract}
+EcoTrack combines load forecasting, anomaly detection, and a grounded conversational assistant to support building energy operations. This paper presents the system architecture, experimental protocol, and evaluation results.
+\end{abstract}
+\begin{IEEEkeywords}building energy management, load forecasting, anomaly detection, explainable AI, copilot
+\end{IEEEkeywords}
+\section{Introduction}
+Buildings require timely, interpretable detection of abnormal electricity use. EcoTrack closes the loop from telemetry to operator diagnosis.
+\section{System Architecture}
+Figure~\ref{fig:architecture} summarizes the platform. Export the provided SVG to PDF before Overleaf compilation.
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.96\textwidth]{../architecture/ecotrack-system-architecture.pdf}
+  \caption{End-to-end EcoTrack system architecture.}
+  \label{fig:architecture}
+\end{figure*}
+\section{Methodology}
+Describe the BDG2 preprocessing pipeline, XGBoost confidence interval estimation, Isolation Forest detector, and grounded Copilot workflow.
+\section{Experiments and Results}
+Report train/test splits, forecasting error, anomaly metrics, latency, and ablation studies.
+\section{Conclusion}
+Summarize operational impact, limitations, and future work.
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+\end{document}

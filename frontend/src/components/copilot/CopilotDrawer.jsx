@@ -4,7 +4,7 @@ import ChatMessage from './ChatMessage';
 import QuickPrompts from './QuickPrompts';
 import { useCopilot } from '../../hooks/useCopilot';
 
-export default function CopilotDrawer({ isOpen, onClose }) {
+export default function CopilotDrawer({ isOpen, onClose, initialMessage = '' }) {
   const { messages, isLoading, error, sendMessage, clearHistory } = useCopilot();
   const [input, setInput] = useState('');
   const bottomRef = useRef(null);
@@ -15,8 +15,14 @@ export default function CopilotDrawer({ isOpen, onClose }) {
   }, [messages, isLoading]);
 
   useEffect(() => {
-    if (isOpen) setTimeout(() => inputRef.current?.focus(), 120);
-  }, [isOpen]);
+    if (!isOpen) return undefined;
+    if (initialMessage) setInput(initialMessage);
+    const focusTimer = setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(initialMessage.length, initialMessage.length);
+    }, 320);
+    return () => clearTimeout(focusTimer);
+  }, [isOpen, initialMessage]);
 
   const handleSend = () => {
     const msg = input.trim();
@@ -41,6 +47,9 @@ export default function CopilotDrawer({ isOpen, onClose }) {
 
       {/* Drawer panel */}
       <aside
+        role="dialog"
+        aria-modal="true"
+        aria-label="EcoTrack Copilot"
         className={`fixed right-0 top-0 z-40 flex h-full w-full flex-col bg-slate-900 shadow-2xl transition-transform duration-300 ease-in-out sm:w-[420px] lg:w-[480px] ${
           isOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
