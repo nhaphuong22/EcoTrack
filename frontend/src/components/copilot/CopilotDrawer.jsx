@@ -4,7 +4,7 @@ import ChatMessage from './ChatMessage';
 import QuickPrompts from './QuickPrompts';
 import { useCopilot } from '../../hooks/useCopilot';
 
-export default function CopilotDrawer({ isOpen, onClose }) {
+export default function CopilotDrawer({ isOpen, onClose, anomalyId = null, initialMessage = '' }) {
   const { messages, isLoading, error, sendMessage, clearHistory } = useCopilot();
   const [input, setInput] = useState('');
   const bottomRef = useRef(null);
@@ -18,11 +18,15 @@ export default function CopilotDrawer({ isOpen, onClose }) {
     if (isOpen) setTimeout(() => inputRef.current?.focus(), 120);
   }, [isOpen]);
 
+  useEffect(() => {
+    if (initialMessage) setInput(initialMessage);
+  }, [initialMessage]);
+
   const handleSend = () => {
     const msg = input.trim();
     if (!msg || isLoading) return;
     setInput('');
-    sendMessage(msg);
+    sendMessage(msg, anomalyId);
   };
 
   const handleKey = (e) => {
@@ -103,7 +107,7 @@ export default function CopilotDrawer({ isOpen, onClose }) {
 
         {/* Quick prompts + input */}
         <div className="border-t border-slate-700/60 px-5 py-4 space-y-3 bg-slate-900/80">
-          <QuickPrompts onSelect={(msg) => { setInput(''); sendMessage(msg); }} disabled={isLoading} />
+          <QuickPrompts onSelect={(msg) => { setInput(''); sendMessage(msg, anomalyId); }} disabled={isLoading} />
 
           <div className="flex gap-2">
             <textarea

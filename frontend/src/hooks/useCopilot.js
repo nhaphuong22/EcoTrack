@@ -13,7 +13,7 @@ export function useCopilot() {
   const [error, setError]         = useState(null);
   const historyRef = useRef([]);
 
-  const sendMessage = useCallback(async (userMessage) => {
+  const sendMessage = useCallback(async (userMessage, anomalyId = null) => {
     if (!userMessage.trim()) return;
 
     const userEntry = { role: 'user', content: userMessage, tools_used: [] };
@@ -25,7 +25,8 @@ export function useCopilot() {
       const data = await sendCopilotMessage(
         userMessage,
         'office_tower_01',
-        historyRef.current
+        historyRef.current,
+        anomalyId
       );
       const assistantEntry = {
         role: 'assistant',

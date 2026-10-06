@@ -16,7 +16,12 @@ class CopilotOrchestrator:
         self.gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
         self.openai_key = os.getenv("OPENAI_API_KEY", "").strip()
 
-    def process_chat(self, user_message: str, history: List[Dict[str, Any]] = None) -> Tuple[str, List[str]]:
+    def process_chat(
+        self,
+        user_message: str,
+        history: List[Dict[str, Any]] = None,
+        anomaly_id: str = None,
+    ) -> Tuple[str, List[str]]:
         """
         Processes a chat turn using Cloud LLM or rule-based tool dispatch fallback.
         Returns: (assistant_response_markdown, list_of_tools_called)
@@ -47,6 +52,35 @@ class CopilotOrchestrator:
         if any(w in msg_lower for w in ["chi phí", "tiền", "lãng phí", "cost", "vnd"]):
             tools_called.append("calculate_waste_cost")
 
+        # When the UI sends an anomaly_id, ground the response in that exact
+        # event instead of allowing the heuristic fallback to choose another
+        # recent anomaly.
+        selected_anomaly = None
+        if anomaly_id:
+            anomaly_candidates = get_anomalies(limit=100)
+            selected_anomaly = next(
+                (item for item in anomaly_candidates if item.get("id") == anomaly_id),
+                None,
+            )
+            if selected_anomaly:
+                anomalies_data = [selected_anomaly]
+                if "get_anomalies" not in tools_called:
+                    tools_called.append("get_anomalies")
+
+        anomaly_context = ""
+        if selected_anomaly:
+            anomaly_context = f"""
+[ANOMALY CONTEXT - use this exact event]
+Anomaly ID: {selected_anomaly['id']}
+Timestamp: {selected_anomaly['timestamp']}
+Severity: {selected_anomaly['severity']}
+Actual consumption: {selected_anomaly['actual_kwh']} kWh
+Predicted baseline: {selected_anomaly['predicted_kwh']} kWh
+Delta: {selected_anomaly['delta_kwh']} kWh
+Anomaly score: {selected_anomaly['anomaly_score']}
+Possible reason: {selected_anomaly['reason']}
+"""
+
         # Step 2: Try Cloud API if keys are provided
         if self.gemini_key:
             try:
@@ -61,6 +95,7 @@ class CopilotOrchestrator:
                     context_str += f"\n[Dữ liệu Tool get_anomalies]: {json.dumps(anomalies_data, ensure_ascii=False)}"
                 if forecast_data:
                     context_str += f"\n[Dữ liệu Tool query_forecast_summary]: {json.dumps(forecast_data, ensure_ascii=False)}"
+                context_str += anomaly_context
                 
                 prompt = f"{SYSTEM_PROMPT}\n{context_str}\n\nNgười dùng: {user_message}"
                 response = client.models.generate_content(
@@ -86,6 +121,7 @@ class CopilotOrchestrator:
                     context_str += f"\n[Dữ liệu Tool get_anomalies]: {json.dumps(anomalies_data, ensure_ascii=False)}"
                 if forecast_data:
                     context_str += f"\n[Dữ liệu Tool query_forecast_summary]: {json.dumps(forecast_data, ensure_ascii=False)}"
+                context_str += anomaly_context
 
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",

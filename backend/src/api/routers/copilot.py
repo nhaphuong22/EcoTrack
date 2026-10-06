@@ -12,7 +12,8 @@ async def chat_with_copilot(req: CopilotChatRequest):
     reply, tools_used = await asyncio.to_thread(
         copilot_orchestrator.process_chat,
         req.message,
-        history_dicts
+        history_dicts,
+        req.anomaly_id
     )
     return CopilotChatResponse(
         reply=reply,

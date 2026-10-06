@@ -3,6 +3,7 @@ import json
 import math
 import numpy as np
 import pandas as pd
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 def generate_synthetic_bdg2_dataset(days: int = 30) -> pd.DataFrame:
@@ -92,7 +93,14 @@ def generate_synthetic_bdg2_dataset(days: int = 30) -> pd.DataFrame:
 
 class BDG2DataLoader:
     def __init__(self, data_path: str = "data/sample_bdg2_energy.json"):
-        self.data_path = data_path
+        # Resolve the default dataset relative to the backend package rather
+        # than the process working directory. This keeps API routes and the
+        # Copilot agent on the same dataset when Uvicorn is launched from the
+        # repository root or from backend/.
+        path = Path(data_path)
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parents[2] / path
+        self.data_path = str(path)
         self._df = None
 
     def get_or_create_data(self) -> pd.DataFrame:

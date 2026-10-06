@@ -25,9 +25,15 @@ export const fetchForecast = () =>
   apiClient.get('/api/v1/forecast/predict').then(r => r.data);
 
 /** POST /api/v1/copilot/chat */
-export const sendCopilotMessage = (message, buildingId = 'office_tower_01', history = []) =>
+export const sendCopilotMessage = (
+  message,
+  buildingId = 'office_tower_01',
+  history = [],
+  anomalyId = null
+) =>
   apiClient.post('/api/v1/copilot/chat', {
     message,
     building_id: buildingId,
+    anomaly_id: anomalyId,
     history,
   }).then(r => r.data);

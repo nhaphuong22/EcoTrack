@@ -9,6 +9,7 @@ class ChatMessage(BaseModel):
 class CopilotChatRequest(BaseModel):
     message: str
     building_id: str = "office_tower_01"
+    anomaly_id: Optional[str] = None
     history: List[ChatMessage] = []
 
 class CopilotChatResponse(BaseModel):

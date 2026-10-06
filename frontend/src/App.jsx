@@ -11,8 +11,10 @@ export default function App() {
   const { metrics, timeSeries, anomalies, loading, error, refetch } = useEnergyData(168);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pendingPrompt, setPendingPrompt] = useState('');
+  const [selectedAnomalyId, setSelectedAnomalyId] = useState(null);
 
   const handleAskCopilot = useCallback((anomaly) => {
+    setSelectedAnomalyId(anomaly.id);
     setPendingPrompt(
       `Phân tích sự cố ${anomaly.id} xảy ra lúc ${anomaly.timestamp?.slice(0, 16)} — ` +
       `phụ tải tăng +${anomaly.delta_kwh} kWh so với baseline, điểm bất thường ${anomaly.anomaly_score?.toFixed(2)}. ` +
@@ -92,7 +94,12 @@ export default function App() {
       {/* Copilot Slide-over Drawer */}
       <CopilotDrawer
         isOpen={drawerOpen}
-        onClose={() => { setDrawerOpen(false); setPendingPrompt(''); }}
+        anomalyId={selectedAnomalyId}
+        onClose={() => {
+          setDrawerOpen(false);
+          setPendingPrompt('');
+          setSelectedAnomalyId(null);
+        }}
         initialMessage={pendingPrompt}
       />
     </div>
