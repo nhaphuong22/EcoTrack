@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from src.database import init_db
-from src.api.routers import energy, forecast, anomalies, copilot, buildings
+from src.api.routers import energy, forecast, anomalies, copilot, buildings, internal
 
 # Initialize Database Schema
 init_db()
@@ -32,6 +32,7 @@ app.include_router(energy.router)
 app.include_router(forecast.router)
 app.include_router(anomalies.router)
 app.include_router(copilot.router)
+app.include_router(internal.router)
 
 @app.get("/")
 def root():

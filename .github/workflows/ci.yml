@@ -55,7 +55,33 @@ jobs:
           pytest tests/ -v
 
   # ==========================================
-  # JOB 2: Frontend Build (React + Vite)
+  # JOB 2: Express Backend Test (Node.js 20)
+  # ==========================================
+  backend-test:
+    name: Express Backend Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies & Generate Prisma
+        run: |
+          npm install
+          npx prisma generate
+
+      - name: Run Vitest Unit Tests
+        run: npm test
+
+  # ==========================================
+  # JOB 3: Frontend Build (React + Vite)
   # ==========================================
   frontend-build:
     name: Frontend Build
@@ -81,7 +107,7 @@ jobs:
         run: npm run build
 
   # ==========================================
-  # JOB 3: Docker Compose Validation
+  # JOB 4: Docker Compose Validation
   # ==========================================
   docker-validation:
     name: Docker Compose Validation

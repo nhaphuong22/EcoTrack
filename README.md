@@ -44,14 +44,16 @@ npm run dev
 
 #### ⚡ Lệnh này sẽ tự động:
 1. 🐘 **Khởi động CSDL PostgreSQL** ngầm trong Docker (`ecotrack_postgres` - cổng 5432).
-2. 🔌 **Khởi động Backend FastAPI** tại `http://localhost:8000` (tự động reload khi sửa code Python).
-3. 💻 **Khởi động Frontend React Vite** tại `http://localhost:3000` (tự động cập nhật giao diện tức thì khi sửa UI).
+2. 🧠 **Khởi động AI Service (FastAPI)** tại `http://localhost:8000` (XGBoost, Isolation Forest & Copilot).
+3. 🔌 **Khởi động Backend API Gateway (Express.js)** tại `http://localhost:5000` (Prisma ORM, CRUD, In-memory cache).
+4. 💻 **Khởi động Frontend React Vite** tại `http://localhost:3000` (Hot-Reload tức thì).
 
 | Dịch vụ | URL / Địa chỉ | Chức năng |
 | :--- | :--- | :--- |
 | 💻 **Dashboard UI** | **http://localhost:3000** | Giao diện giám sát năng lượng, biểu đồ & AI Copilot |
-| 🔌 **Backend API** | **http://localhost:8000** | REST API tính toán năng lượng & suy luận ML |
-| 📚 **Swagger Docs** | **http://localhost:8000/docs** | Tài liệu kiểm thử API tương tác trực quan |
+| 🔌 **Backend API** | **http://localhost:5000** | Express.js API Gateway, CRUD, Cache TTL & Proxy |
+| 🧠 **AI Service** | **http://localhost:8000** | Pure Python FastAPI — ML Inference & ReAct Copilot |
+| 📚 **AI Docs** | **http://localhost:8000/docs** | Swagger Docs tài liệu kiểm thử AI Engine |
 | 🗄️ **PostgreSQL DB** | `localhost:5432` | DB: `ecotrack` \| User: `ecotrack` \| Pass: `ecotrack_secret` |
 
 > 💡 **Cách dừng hệ thống:** Nhấn **`Ctrl + C`** tại cửa sổ Terminal đang chạy.
@@ -62,22 +64,27 @@ npm run dev
 
 ```
 EcoTrack Monorepo
-├── backend/                    # FastAPI · XGBoost · Isolation Forest · LLM Agent
+├── backend/                    # [MỚI] Node.js · Express · Prisma · API Gateway (Port 5000)
+│   ├── prisma/schema.prisma    # PostgreSQL Schema & Indexes
 │   ├── src/
-│   │   ├── data_pipeline/      # Building Data Genome 2 loader + Feature Engineering
-│   │   ├── models/
-│   │   │   ├── forecaster_xgboost/        # Dự báo phụ tải 24h
-│   │   │   └── anomaly_isolation_forest/  # Phát hiện bất thường
-│   │   ├── agent/              # LLM Copilot (ReAct · Tool Calling)
-│   │   └── api/                # FastAPI routers + Pydantic schemas
-│   └── configs/                # model_config.yaml · agent_config.yaml
+│   │   ├── routes/             # buildings, energy, forecast, anomalies, copilot
+│   │   ├── services/           # buildingService, anomalyService
+│   │   ├── utils/              # aiClient (Proxy to FastAPI), InMemoryTTLCache
+│   │   └── server.js           # Express App Entrypoint
+│   └── tests/                  # Vitest + Supertest Gateway Tests
 │
-└── frontend/                   # React 18 · Vite · TailwindCSS · Recharts
+├── ai-service/                 # [CHUYỂN ĐỔI] Pure Python · FastAPI (Port 8000)
+│   ├── src/
+│   │   ├── data_pipeline/      # BDG2 data loader, Feature Engineering, Streaming worker
+│   │   ├── models/             # XGBoost Forecaster (24h) & Isolation Forest Anomaly
+│   │   ├── agent/              # ReAct Copilot (Gemini / OpenAI Tools)
+│   │   └── api/routers/        # /internal endpoints + /api/v1 compatible routes
+│   └── tests/                  # Pytest Unit & Integration Tests (42 tests)
+│
+└── frontend/                   # React 18 · Vite · TailwindCSS · Recharts (Port 3000)
     └── src/
-        ├── components/dashboard/  # MetricCards · ForecastChart · AnomalyTable
-        ├── components/copilot/    # CopilotDrawer · ChatMessage · QuickPrompts
-        ├── hooks/                 # useEnergyData · useCopilot
-        └── services/api.js        # Axios client
+        ├── components/         # MetricCards · ForecastChart · AnomalyTable · CopilotDrawer
+        └── services/api.js     # Axios client kết nối Express Backend (:5000)
 ```
 
 ---

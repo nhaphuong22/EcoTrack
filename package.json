@@ -4,10 +4,12 @@
   "private": true,
   "description": "EcoTrack - Smart Building Energy Management System",
   "scripts": {
-    "dev": "docker compose up -d db && npx concurrently -n \"AI,FRONTEND\" -c \"magenta,cyan\" \"python -m uvicorn src.main:app --app-dir ai-service --reload --port 8000\" \"npm run dev --prefix frontend\"",
+    "dev": "docker compose up -d db && npx concurrently -n \"AI,BACKEND,FRONTEND\" -c \"magenta,green,cyan\" \"python -m uvicorn src.main:app --app-dir ai-service --reload --port 8000\" \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
     "dev:all": "docker compose up",
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
-    "test": "pytest ai-service"
+    "test:ai": "pytest ai-service",
+    "test:backend": "npm test --prefix backend",
+    "test": "pytest ai-service && npm test --prefix backend"
   }
 }
