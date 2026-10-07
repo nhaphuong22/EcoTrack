@@ -18,3 +18,10 @@ async def chat_with_copilot(req: CopilotChatRequest):
         reply=reply,
         tools_used=tools_used
     )
+
+@router.get("/experiment-stats")
+async def get_experiment_stats():
+    """Trả về thống kê số liệu log thực nghiệm phục vụ bài báo NCKH."""
+    from src.agent.experiment_logger import experiment_logger
+    return experiment_logger.get_summary_statistics()
+

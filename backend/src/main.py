@@ -5,7 +5,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from src.api.routers import energy, forecast, anomalies, copilot
+from src.database import init_db
+from src.api.routers import energy, forecast, anomalies, copilot, buildings
+
+# Initialize Database Schema
+init_db()
 
 app = FastAPI(
     title="EcoTrack - Building Energy Management & Copilot API",
@@ -23,6 +27,7 @@ app.add_middleware(
 )
 
 # Mount API Routers
+app.include_router(buildings.router)
 app.include_router(energy.router)
 app.include_router(forecast.router)
 app.include_router(anomalies.router)

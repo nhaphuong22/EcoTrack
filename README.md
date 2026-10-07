@@ -4,62 +4,57 @@
 
 ---
 
-## 🚀 Khởi chạy nhanh (5 phút)
+## 🚀 Khởi chạy dự án (Chỉ 1 lệnh duy nhất)
 
-### Yêu cầu hệ thống
-- Docker Desktop ≥ 24.x + Docker Compose ≥ 2.24
-- (Tuỳ chọn) Google Gemini API Key hoặc OpenAI API Key để kích hoạt Copilot Agent
+Dự án được tối ưu để khởi chạy đồng thời toàn bộ hệ thống (**Database PostgreSQL**, **Backend FastAPI**, và **Frontend React Vite**) chỉ bằng **1 lệnh duy nhất** trong cùng một cửa sổ Terminal, hỗ trợ **Hot-Reload / Auto-Reload** tự động khi sửa code.
 
-### Bước 1: Clone và cấu hình môi trường
-```bash
-git clone https://github.com/nhaphuong22/EcoTrack.git
-cd EcoTrack
-
-# Tạo file .env cho backend từ mẫu
-cp backend/.env.example backend/.env
-
-# (Tuỳ chọn) Điền API Key vào backend/.env
-# GEMINI_API_KEY=your-gemini-api-key
-# OPENAI_API_KEY=your-openai-api-key
-```
-
-### Bước 2: Khởi chạy toàn bộ hệ thống
-```bash
-docker-compose up --build
-```
-
-| Service          | URL                           |
-| :--------------- | :---------------------------- |
-| 🔌 Backend API   | http://localhost:8000          |
-| 📚 Swagger Docs  | http://localhost:8000/docs     |
-| 💻 Dashboard UI  | http://localhost:3000          |
+### 📋 Yêu cầu môi trường
+- **Docker Desktop** (đang bật để chạy CSDL PostgreSQL)
+- **Python** (≥ 3.10) & **Node.js** (≥ 18.x)
+- *(Tuỳ chọn)* Điền `GEMINI_API_KEY` hoặc `OPENAI_API_KEY` vào file `backend/.env` để kích hoạt trợ lý AI Copilot.
 
 ---
 
-## 🛠️ Phát triển local (không Docker)
+### Bước 1: Cài đặt thư viện (Chỉ thực hiện lần đầu tiên)
 
-### Backend (Python FastAPI)
+Mở terminal tại thư mục gốc `EcoTrack`:
+
 ```bash
-cd backend
+# Tạo file cấu hình môi trường cho backend từ mẫu
+cp backend/.env.example backend/.env
 
-# Tạo và kích hoạt môi trường ảo Python
-python -m venv venv
-# Kích hoạt trên Windows (PowerShell): .\venv\Scripts\Activate.ps1
-# Kích hoạt trên Windows (CMD):        venv\Scripts\activate.bat
-# Kích hoạt trên Linux / macOS:        source venv/bin/activate
+# Cài đặt thư viện Backend Python
+pip install -r backend/requirements.txt
 
-pip install -r requirements.txt
-cp .env.example .env          # Điền API key nếu có
-uvicorn src.main:app --reload --port 8000
+# Cài đặt thư viện Frontend React
+npm install --prefix frontend
 ```
 
-### Frontend (React + Vite)
+---
+
+### Bước 2: Khởi chạy dự án
+
+Tại thư mục gốc `EcoTrack`, chỉ cần chạy:
+
 ```bash
-cd frontend
-npm install
 npm run dev
-# → http://localhost:3000
 ```
+
+*(Trên Windows, bạn cũng có thể gõ `.\dev.bat` hoặc **nhấp đúp chuột vào file `dev.bat`** để chạy ngay).*
+
+#### ⚡ Lệnh này sẽ tự động:
+1. 🐘 **Khởi động CSDL PostgreSQL** ngầm trong Docker (`ecotrack_postgres` - cổng 5432).
+2. 🔌 **Khởi động Backend FastAPI** tại `http://localhost:8000` (tự động reload khi sửa code Python).
+3. 💻 **Khởi động Frontend React Vite** tại `http://localhost:3000` (tự động cập nhật giao diện tức thì khi sửa UI).
+
+| Dịch vụ | URL / Địa chỉ | Chức năng |
+| :--- | :--- | :--- |
+| 💻 **Dashboard UI** | **http://localhost:3000** | Giao diện giám sát năng lượng, biểu đồ & AI Copilot |
+| 🔌 **Backend API** | **http://localhost:8000** | REST API tính toán năng lượng & suy luận ML |
+| 📚 **Swagger Docs** | **http://localhost:8000/docs** | Tài liệu kiểm thử API tương tác trực quan |
+| 🗄️ **PostgreSQL DB** | `localhost:5432` | DB: `ecotrack` \| User: `ecotrack` \| Pass: `ecotrack_secret` |
+
+> 💡 **Cách dừng hệ thống:** Nhấn **`Ctrl + C`** tại cửa sổ Terminal đang chạy.
 
 ---
 
@@ -126,10 +121,32 @@ EcoTrack Monorepo
 
 ---
 
+## 🔬 Nghiên cứu Khoa học (NCKH) & Benchmarks
+
+Hệ thống tích hợp đầy đủ module XAI và các bài kiểm thử thực nghiệm:
+- **Explainable AI (SHAP TreeExplainer):** `backend/src/models/explainability.py`
+- **Đánh giá Chỉ số Giảm thiểu Báo giả (FPR, Precision, Recall, F1):** `backend/src/models/evaluation_metrics.py`
+- **Lệnh chạy thực nghiệm SHAP & FPR:**
+  ```bash
+  python backend/experiments/run_xai_and_evaluation.py
+  ```
+- **Lệnh nạp dữ liệu mẫu sạch:**
+  ```bash
+  python backend/seed_data.py
+  ```
+- **Lệnh chạy Stream Telemetry Worker:**
+  ```bash
+  python backend/src/data_pipeline/stream_worker.py
+  ```
+
+---
+
 ## 📄 Tài liệu dự án
 
-| Tài liệu | Đường dẫn |
-| :--- | :--- |
-| 📋 PRD | `_bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/prd.md` |
-| 🏛️ Architecture Spine | `_bmad-output/planning-artifacts/architecture/architecture-EcoTrack-2026-09-23/ARCHITECTURE-SPINE.md` |
-| 🔧 Technical Addendum | `_bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/addendum.md` |
+| Tài liệu | Đường dẫn | Mô tả |
+| :--- | :--- | :--- |
+| 📘 **Hướng dẫn Cài đặt & Vận hành Chi tiết** | [`docs/SETUP_AND_USAGE_GUIDE.md`](docs/SETUP_AND_USAGE_GUIDE.md) | **Hướng dẫn toàn diện từ A-Z, NCKH & Docker** |
+| 📝 **Bản thảo Báo cáo Khoa học (Draft)** | [`docs/ECOTRACK_SCIENTIFIC_REPORT_DRAFT.md`](docs/ECOTRACK_SCIENTIFIC_REPORT_DRAFT.md) | Bản thảo bài báo NCKH theo chuẩn IEEE/Scopus |
+| 📊 **Case Studies Benchmark** | [`docs/CASE_STUDIES_BENCHMARK.md`](docs/CASE_STUDIES_BENCHMARK.md) | 4 Kịch bản kiểm thử dị thường FDD thực tế |
+| 📋 **PRD** | `_bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/prd.md` | Tài liệu yêu cầu sản phẩm |
+| 🏛️ **Architecture Spine** | `_bmad-output/planning-artifacts/architecture/architecture-EcoTrack-2026-09-23/ARCHITECTURE-SPINE.md` | Thiết kế kiến trúc kỹ thuật hệ thống |
