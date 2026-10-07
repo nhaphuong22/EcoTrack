@@ -102,3 +102,22 @@ def test_api_anomalies_events(client):
     assert isinstance(events, list)
     assert len(events) > 0
     assert "severity" in events[0]
+
+
+def test_internal_ai_endpoints(client):
+    """Verify internal endpoints consumed by Express gateway."""
+    # 1. Forecast
+    fc_resp = client.get("/internal/forecast/predict")
+    assert fc_resp.status_code == 200
+    assert len(fc_resp.json()["forecast"]) == 24
+
+    # 2. Metrics
+    met_resp = client.get("/internal/energy/metrics")
+    assert met_resp.status_code == 200
+    assert "total_consumption_kwh" in met_resp.json()
+
+    # 3. Anomaly detection
+    anom_resp = client.get("/internal/anomalies/detect")
+    assert anom_resp.status_code == 200
+    assert isinstance(anom_resp.json(), list)
+    assert len(anom_resp.json()) > 0

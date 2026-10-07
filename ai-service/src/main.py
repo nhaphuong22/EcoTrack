@@ -5,19 +5,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from src.database import init_db
-from src.api.routers import energy, forecast, anomalies, copilot, buildings, internal
-
-# Initialize Database Schema
-init_db()
+from src.api.routers import energy, forecast, anomalies, copilot, internal
 
 app = FastAPI(
-    title="EcoTrack - Building Energy Management & Copilot API",
+    title="EcoTrack - Building Energy Management & Copilot AI Engine",
     version="1.0.0",
-    description="Backend API for building energy forecasting (XGBoost), anomaly detection (Isolation Forest), and conversational AI Copilot."
+    description="Dedicated AI & Analytics microservice for building energy forecasting (XGBoost), anomaly detection (Isolation Forest), and conversational AI Copilot."
 )
 
-# CORS configuration for Frontend SPA
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,8 +22,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount API Routers
-app.include_router(buildings.router)
+# Mount AI Routers
 app.include_router(energy.router)
 app.include_router(forecast.router)
 app.include_router(anomalies.router)

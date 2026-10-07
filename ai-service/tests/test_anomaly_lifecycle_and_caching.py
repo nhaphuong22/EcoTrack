@@ -40,69 +40,6 @@ def test_get_anomalies_events(client):
     assert first_event["status"] in ["OPEN", "New", "ACKNOWLEDGED", "RESOLVED"]
 
 
-def test_update_anomaly_status_lifecycle(client):
-    """Verifies state transition lifecycle: OPEN -> ACKNOWLEDGED -> RESOLVED."""
-    # 1. Fetch available anomalies to get a target ID
-    get_resp = client.get("/api/v1/anomalies/events")
-    assert get_resp.status_code == 200
-    events = get_resp.json()
-    assert len(events) > 0
-    target_id = events[0]["id"]
-
-    # 2. Transition to ACKNOWLEDGED
-    ack_payload = {
-        "status": "ACKNOWLEDGED",
-        "note": "Operator dispatched technician to inspect HVAC condenser.",
-    }
-    ack_resp = client.patch(f"/api/v1/anomalies/{target_id}/status", json=ack_payload)
-    assert ack_resp.status_code == 200
-    ack_data = ack_resp.json()
-    assert ack_data["id"] == target_id
-    assert ack_data["current_status"] == "ACKNOWLEDGED"
-    assert "technician" in ack_data["note"]
-
-    # 3. Transition to RESOLVED
-    res_payload = {
-        "status": "RESOLVED",
-        "note": "Filter replaced. Power draw returned to normal.",
-    }
-    res_resp = client.patch(f"/api/v1/anomalies/{target_id}/status", json=res_payload)
-    assert res_resp.status_code == 200
-    res_data = res_resp.json()
-    assert res_data["id"] == target_id
-    assert res_data["previous_status"] == "ACKNOWLEDGED"
-    assert res_data["current_status"] == "RESOLVED"
-
-    # 4. Verify persistent status is reflected in list
-    verify_resp = client.get("/api/v1/anomalies/events")
-    assert verify_resp.status_code == 200
-    updated_event = next((e for e in verify_resp.json() if e["id"] == target_id), None)
-    assert updated_event is not None
-    assert updated_event["status"] == "RESOLVED"
-
-
-def test_update_anomaly_invalid_status_returns_422(client):
-    """Verifies that invalid status values are rejected with 422 Unprocessable Entity."""
-    get_resp = client.get("/api/v1/anomalies/events")
-    events = get_resp.json()
-    target_id = events[0]["id"]
-
-    invalid_payload = {
-        "status": "COMPLETELY_INVALID_STATUS",
-        "note": "This should fail validation.",
-    }
-    response = client.patch(f"/api/v1/anomalies/{target_id}/status", json=invalid_payload)
-    assert response.status_code == 422
-
-
-def test_update_anomaly_not_found_returns_404(client):
-    """Verifies that non-existent anomaly IDs return 404 Not Found."""
-    payload = {"status": "RESOLVED", "note": "Testing 404 response."}
-    response = client.patch("/api/v1/anomalies/ANOM-NONEXISTENT-99999/status", json=payload)
-    assert response.status_code == 404
-    assert "not found" in response.json()["detail"].lower()
-
-
 def test_energy_ttl_caching_and_latency(client):
     """Verifies in-memory TTL caching reduces response latency and sets X-Cache headers."""
     # 1. Clear cache
