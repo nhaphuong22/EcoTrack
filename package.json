@@ -8,6 +8,10 @@
     "dev:all": "docker compose up",
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
+    "db:migrate": "npm run prisma:migrate --prefix backend",
+    "db:push": "npm run prisma:push --prefix backend",
+    "db:studio": "npm run prisma:studio --prefix backend",
+    "db:generate": "npm run prisma:generate --prefix backend",
     "test:ai": "pytest ai-service",
     "test:backend": "npm test --prefix backend",
     "test": "pytest ai-service && npm test --prefix backend"
