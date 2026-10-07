@@ -298,3 +298,42 @@ class StreamDataWorker:
 
 # Global singleton worker instance
 stream_worker = StreamDataWorker()
+
+
+if __name__ == "__main__":
+    import sys
+
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+    print("=" * 70)
+    print("📡 ECOTRACK REAL-TIME TELEMETRY STREAM WORKER")
+    print("Simulating smart meter IoT telemetry ingestion (Interval: 1.0s)...")
+    print("Press Ctrl+C to stop.")
+    print("=" * 70)
+
+    def print_reading(reading):
+        print(
+            f"⚡ [{reading.get('timestamp')}] Building: {reading.get('building_id')} | "
+            f"Meter: {reading.get('meter_reading', 0):.2f} kWh | "
+            f"Temp: {reading.get('air_temperature', 0):.1f}°C"
+        )
+
+    stream_worker.register_listener(print_reading)
+
+    async def _run_cli():
+        await stream_worker.start_streaming(interval_seconds=1.0)
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            await stream_worker.stop_streaming()
+            print("\n🛑 Stream worker stopped.")
+
+    try:
+        asyncio.run(_run_cli())
+    except KeyboardInterrupt:
+        print("\n🛑 Stream worker stopped.")
