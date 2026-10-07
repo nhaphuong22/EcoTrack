@@ -19,7 +19,10 @@ const DEFAULT_BUILDINGS = [
   },
 ];
 
+let isSeeded = false;
+
 async function seedDefaultBuildingsIfNeeded() {
+  if (isSeeded) return;
   try {
     for (const b of DEFAULT_BUILDINGS) {
       await prisma.building.upsert({
@@ -29,7 +32,9 @@ async function seedDefaultBuildingsIfNeeded() {
       });
       await seedInitialReadingsIfNeeded(b.id);
     }
+    isSeeded = true;
   } catch (err) {
+    // If DB is temporarily unreachable, allow future retry
     console.warn('Could not seed default buildings (DB might be offline):', err.message);
   }
 }

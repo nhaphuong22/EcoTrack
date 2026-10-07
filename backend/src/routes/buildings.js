@@ -1,11 +1,6 @@
 const express = require('express');
 const { z } = require('zod');
-const {
-  listBuildings,
-  getBuildingById,
-  createBuilding,
-  getBuildingHistory,
-} = require('../services/buildingService');
+const buildingService = require('../services/buildingService');
 
 const router = express.Router();
 
@@ -21,7 +16,7 @@ const BuildingCreateSchema = z.object({
 // GET /api/v1/buildings
 router.get('/', async (req, res, next) => {
   try {
-    const result = await listBuildings();
+    const result = await buildingService.listBuildings();
     res.json(result);
   } catch (err) {
     next(err);
@@ -31,7 +26,7 @@ router.get('/', async (req, res, next) => {
 // GET /api/v1/buildings/:id
 router.get('/:id', async (req, res, next) => {
   try {
-    const building = await getBuildingById(req.params.id);
+    const building = await buildingService.getBuildingById(req.params.id);
     if (!building) {
       return res.status(404).json({
         detail: `Building with id '${req.params.id}' not found.`,
@@ -47,13 +42,13 @@ router.get('/:id', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const data = BuildingCreateSchema.parse(req.body);
-    const existing = await getBuildingById(data.id);
+    const existing = await buildingService.getBuildingById(data.id);
     if (existing) {
       return res.status(409).json({
         detail: `Building with id '${data.id}' already exists.`,
       });
     }
-    const created = await createBuilding(data);
+    const created = await buildingService.createBuilding(data);
     res.status(201).json(created);
   } catch (err) {
     next(err);
@@ -64,7 +59,7 @@ router.post('/', async (req, res, next) => {
 router.get('/:id/history', async (req, res, next) => {
   try {
     const limit = parseInt(req.query.limit || '168', 10);
-    const history = await getBuildingHistory(req.params.id, Math.min(Math.max(limit, 1), 1000));
+    const history = await buildingService.getBuildingHistory(req.params.id, Math.min(Math.max(limit, 1), 1000));
     if (!history) {
       return res.status(404).json({
         detail: `Building with id '${req.params.id}' not found.`,
