@@ -1,6 +1,6 @@
 """
-EcoTrack Backend - Smoke & Integration Tests
-Validates ETL pipeline, ML forecaster, anomaly detector, and core FastAPI endpoints.
+EcoTrack AI Service - Smoke & Integration Tests
+Validates ETL pipeline, ML forecaster, anomaly detector, and internal FastAPI AI endpoints.
 """
 import pytest
 from starlette.testclient import TestClient
@@ -65,8 +65,8 @@ def test_api_root(client):
 
 
 def test_api_energy_metrics(client):
-    """Verify energy summary metrics API."""
-    response = client.get("/api/v1/energy/metrics")
+    """Verify internal energy summary metrics API."""
+    response = client.get("/internal/energy/metrics")
     assert response.status_code == 200
     data = response.json()
     assert data["building_id"] == "office_tower_01"
@@ -76,8 +76,8 @@ def test_api_energy_metrics(client):
 
 
 def test_api_energy_timeseries(client):
-    """Verify energy timeseries API."""
-    response = client.get("/api/v1/energy/timeseries?limit=24")
+    """Verify internal energy timeseries API."""
+    response = client.get("/internal/energy/timeseries?limit=24")
     assert response.status_code == 200
     data = response.json()
     assert data["count"] == 24
@@ -85,8 +85,8 @@ def test_api_energy_timeseries(client):
 
 
 def test_api_forecast_predict(client):
-    """Verify 24h forecast endpoint."""
-    response = client.get("/api/v1/forecast/predict")
+    """Verify internal 24h forecast endpoint."""
+    response = client.get("/internal/forecast/predict")
     assert response.status_code == 200
     data = response.json()
     assert data["building_id"] == "office_tower_01"
@@ -94,30 +94,11 @@ def test_api_forecast_predict(client):
     assert len(data["forecast"]) == 24
 
 
-def test_api_anomalies_events(client):
-    """Verify anomaly events endpoint."""
-    response = client.get("/api/v1/anomalies/events")
+def test_api_anomalies_detect(client):
+    """Verify internal anomaly detection endpoint."""
+    response = client.get("/internal/anomalies/detect")
     assert response.status_code == 200
     events = response.json()
     assert isinstance(events, list)
     assert len(events) > 0
     assert "severity" in events[0]
-
-
-def test_internal_ai_endpoints(client):
-    """Verify internal endpoints consumed by Express gateway."""
-    # 1. Forecast
-    fc_resp = client.get("/internal/forecast/predict")
-    assert fc_resp.status_code == 200
-    assert len(fc_resp.json()["forecast"]) == 24
-
-    # 2. Metrics
-    met_resp = client.get("/internal/energy/metrics")
-    assert met_resp.status_code == 200
-    assert "total_consumption_kwh" in met_resp.json()
-
-    # 3. Anomaly detection
-    anom_resp = client.get("/internal/anomalies/detect")
-    assert anom_resp.status_code == 200
-    assert isinstance(anom_resp.json(), list)
-    assert len(anom_resp.json()) > 0

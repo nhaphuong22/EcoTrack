@@ -1,27 +1,35 @@
 import asyncio
+from typing import Any, Dict, List
 from fastapi import APIRouter
-from src.api.schemas.copilot import CopilotChatRequest, CopilotChatResponse
+from pydantic import BaseModel
+
 from src.agent.orchestrator import copilot_orchestrator
+from src.agent.experiment_logger import experiment_logger
 
-router = APIRouter(prefix="/api/v1/copilot", tags=["LLM Energy Copilot"])
+router = APIRouter(prefix="/internal/copilot", tags=["Energy Copilot"])
 
-@router.post("/chat", response_model=CopilotChatResponse)
-async def chat_with_copilot(req: CopilotChatRequest):
-    # Process reasoning in background thread so server event loop remains responsive
-    history_dicts = [h.model_dump() for h in req.history]
+
+class InternalChatRequest(BaseModel):
+    message: str
+    building_id: str = "office_tower_01"
+    history: List[Dict[str, Any]] = []
+
+
+@router.post("/chat")
+async def chat_with_copilot(req: InternalChatRequest):
+    """Processes conversational reasoning with ReAct energy tools."""
     reply, tools_used = await asyncio.to_thread(
         copilot_orchestrator.process_chat,
         req.message,
-        history_dicts
+        req.history,
     )
-    return CopilotChatResponse(
-        reply=reply,
-        tools_used=tools_used
-    )
+    return {
+        "reply": reply,
+        "tools_used": tools_used,
+    }
+
 
 @router.get("/experiment-stats")
 async def get_experiment_stats():
-    """Trả về thống kê số liệu tương tác và hiệu năng vận hành của Copilot Agent."""
-    from src.agent.experiment_logger import experiment_logger
+    """Returns AI Copilot benchmark metrics and telemetry statistics."""
     return experiment_logger.get_summary_statistics()
-
