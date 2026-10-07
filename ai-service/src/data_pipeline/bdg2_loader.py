@@ -1,6 +1,8 @@
 import os
 import json
 import math
+from pathlib import Path
+from typing import Optional
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta, timezone
@@ -90,9 +92,12 @@ def generate_synthetic_bdg2_dataset(days: int = 30) -> pd.DataFrame:
             
     return df
 
+AI_SERVICE_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_DATA_PATH = AI_SERVICE_ROOT / "data" / "sample_bdg2_energy.json"
+
 class BDG2DataLoader:
-    def __init__(self, data_path: str = "data/sample_bdg2_energy.json"):
-        self.data_path = data_path
+    def __init__(self, data_path: Optional[str] = None):
+        self.data_path = Path(data_path) if data_path else DEFAULT_DATA_PATH
         self._df = None
 
     def get_or_create_data(self) -> pd.DataFrame:

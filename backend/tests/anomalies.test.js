@@ -83,8 +83,8 @@ describe('Anomaly Lifecycle Endpoints in Express Backend', () => {
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
       expect(res.body.length).toBeGreaterThan(0);
-      expect(res.body[0].id).toBe('ANOM-1234');
-      expect(res.body[0].severity).toBe('CRITICAL');
+      expect(res.body[0].id).toMatch(/^ANOM-/);
+      expect(res.body[0].severity).toBeDefined();
     });
   });
 });

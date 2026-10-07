@@ -4,11 +4,11 @@ services:
     container_name: ecotrack_postgres
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     environment:
-      POSTGRES_DB: ecotrack
-      POSTGRES_USER: ecotrack
-      POSTGRES_PASSWORD: ecotrack_secret
+      POSTGRES_DB: ${POSTGRES_DB:-ecotrack}
+      POSTGRES_USER: ${POSTGRES_USER:-ecotrack}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ecotrack_secret}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +24,7 @@ services:
     container_name: ecotrack_ai_service
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${AI_PORT:-8000}:8000"
     environment:
       - PYTHONUNBUFFERED=1
       - APP_ENV=development
@@ -53,13 +53,13 @@ services:
     container_name: ecotrack_backend
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "${PORT:-5000}:5000"
     environment:
       - NODE_ENV=development
       - PORT=5000
-      - DATABASE_URL=postgresql://ecotrack:ecotrack_secret@db:5432/ecotrack?schema=public
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-ecotrack}:${POSTGRES_PASSWORD:-ecotrack_secret}@db:5432/${POSTGRES_DB:-ecotrack}?schema=public
       - AI_SERVICE_URL=http://ai-service:8000
-      - INTERNAL_API_KEY=ecotrack_internal_secret_2026
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-ecotrack_internal_secret_2026}
     volumes:
       - ./backend:/app
       - /app/node_modules
@@ -77,9 +77,9 @@ services:
     container_name: ecotrack_frontend
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     environment:
-      - VITE_API_URL=http://localhost:5000
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:5000}
     volumes:
       - ./frontend:/app
       - /app/node_modules
