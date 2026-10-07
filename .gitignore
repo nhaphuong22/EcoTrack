@@ -19,6 +19,9 @@ env/
 *.pt
 *.db
 *.sqlite3
+*.db-wal
+*.db-shm
+*.db-journal
 
 # 3. Frontend & Node.js
 node_modules/
@@ -42,3 +45,4 @@ data/raw/
 .agents/
 .claude/
 _bmad-output/test-artifacts/
+_bmad-output/party-mode/

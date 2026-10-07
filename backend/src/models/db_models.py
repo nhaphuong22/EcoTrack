@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -67,6 +68,9 @@ class MeterReading(Base):
     """Stores sequential time-series energy consumption and ambient weather telemetry."""
 
     __tablename__ = "meter_readings"
+    __table_args__ = (
+        Index("ix_meter_readings_bldg_ts", "building_id", "timestamp"),
+    )
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     building_id = Column(
@@ -99,6 +103,10 @@ class AnomalyEvent(Base):
     """Stores detected abnormal energy consumption incidents flagged by Isolation Forest."""
 
     __tablename__ = "anomaly_events"
+    __table_args__ = (
+        Index("ix_anomaly_events_bldg_ts", "building_id", "timestamp"),
+        Index("ix_anomaly_events_status", "status"),
+    )
 
     id = Column(String(50), primary_key=True, index=True)  # e.g. ANOM-4B2E81FA
     building_id = Column(
@@ -133,6 +141,9 @@ class Conversation(Base):
     """Stores chat conversations between building operators and the AI Copilot."""
 
     __tablename__ = "conversations"
+    __table_args__ = (
+        Index("ix_conversations_session_created", "session_id", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     building_id = Column(
