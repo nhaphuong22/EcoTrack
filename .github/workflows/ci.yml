@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - develop
+      - feature/**
   pull_request:
     branches:
       - main
@@ -16,7 +17,7 @@ concurrency:
 
 jobs:
   # ==========================================
-  # JOB 1: Backend Test & Lint (Python 3.11)
+  # JOB 1: AI Service Test & Lint (Python 3.11)
   # ==========================================
   ai-service-test:
     name: AI Service Test & Lint
@@ -27,6 +28,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Copy env configuration
+        run: cp .env.example .env
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -67,6 +71,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Copy env configuration
+        run: cp .env.example .env
+
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
@@ -93,6 +100,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Copy env configuration
+        run: cp .env.example .env
+
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
@@ -115,6 +125,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Copy root env configuration
+        run: cp .env.example .env
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
