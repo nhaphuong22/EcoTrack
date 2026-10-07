@@ -19,11 +19,11 @@ services:
       timeout: 5s
       retries: 5
 
-  backend:
+  ai-service:
     build:
-      context: ./backend
+      context: ./ai-service
       dockerfile: Dockerfile
-    container_name: ecotrack_backend
+    container_name: ecotrack_ai_service
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -36,7 +36,7 @@ services:
       - TARIFF_RATE_VND=${TARIFF_RATE_VND:-3100}
     volumes:
       # Mount code for hot-reload during development
-      - ./backend:/app
+      - ./ai-service:/app
       - /app/__pycache__
     depends_on:
       db:
@@ -63,7 +63,7 @@ services:
       - ./frontend:/app
       - /app/node_modules
     depends_on:
-      - backend
+      - ai-service
     command: npm run dev -- --host 0.0.0.0 --port 3000
 
 volumes:
