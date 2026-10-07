@@ -4,59 +4,89 @@
 
 ---
 
-## 🚀 Khởi chạy dự án (Chỉ 1 lệnh duy nhất)
+## 🚀 Hướng Dẫn Cài Đặt & Khởi Chạy (Từ A - Z)
 
-Dự án được tối ưu để khởi chạy đồng thời toàn bộ hệ thống (**Database PostgreSQL**, **Backend FastAPI**, và **Frontend React Vite**) chỉ bằng **1 lệnh duy nhất** trong cùng một cửa sổ Terminal, hỗ trợ **Hot-Reload / Auto-Reload** tự động khi sửa code.
+Dự án được tối ưu để thiết lập môi trường, chạy migration và khởi chạy đồng thời toàn bộ hệ thống (**AI Service FastAPI**, **Backend Express Gateway**, và **Frontend React Vite**) với các lệnh đơn giản ngay từ thư mục gốc.
 
 ### 📋 Yêu cầu môi trường
 - **Docker Desktop** (đang bật để chạy CSDL PostgreSQL)
-- **Python** (≥ 3.10) & **Node.js** (≥ 18.x)
-- *(Tuỳ chọn)* Điền `GEMINI_API_KEY` hoặc `OPENAI_API_KEY` vào file `backend/.env` để kích hoạt trợ lý AI Copilot.
+- **Node.js** (≥ 18.x) & **Python** (≥ 3.10)
 
 ---
 
-### Bước 1: Cài đặt thư viện (Chỉ thực hiện lần đầu tiên)
+### Bước 1: Cài đặt thư viện (Chỉ thực hiện lần đầu)
 
-Mở terminal tại thư mục gốc `EcoTrack`:
+Mở terminal tại thư mục gốc `EcoTrack` và chạy 1 lệnh duy nhất:
 
 ```bash
-# Tạo file cấu hình môi trường cho backend từ mẫu
-cp backend/.env.example backend/.env
-
-# Cài đặt thư viện Backend Python
-pip install -r backend/requirements.txt
-
-# Cài đặt thư viện Frontend React
-npm install --prefix frontend
+npm run install:all
 ```
+
+*(Lệnh này tự động cài đặt tuần tự: thư viện Express/Prisma cho `backend/`, thư viện React/Tailwind cho `frontend/`, và gói Python Machine Learning từ `ai-service/requirements.txt`)*.
 
 ---
 
-### Bước 2: Khởi chạy dự án
+### Bước 2: Khởi động CSDL & Chạy Migrations
 
-Tại thư mục gốc `EcoTrack`, chỉ cần chạy:
+1. **Khởi động PostgreSQL trong Docker**:
+   ```bash
+   npm run db:up
+   ```
+   *(Container `ecotrack_postgres` sẽ khởi chạy ngầm tại cổng `5432`)*.
+
+2. **Chạy Prisma Migration**:
+   ```bash
+   npm run db:migrate
+   ```
+   *(Áp dụng các file SQL migration chính thức vào PostgreSQL. Bạn cũng có thể dùng `npm run db:push` để đồng bộ nhanh schema)*.
+
+3. *(Tùy chọn)* **Mở giao diện Web xem dữ liệu (Prisma Studio)**:
+   ```bash
+   npm run db:studio
+   ```
+   👉 Truy cập **`http://localhost:5555`** để xem và chỉnh sửa dữ liệu dạng bảng trực quan.
+
+---
+
+### Bước 3: Khởi chạy dự án (Run Dev)
+
+Tại thư mục gốc `EcoTrack`, chạy:
 
 ```bash
 npm run dev
 ```
 
-*(Trên Windows, bạn cũng có thể gõ `.\dev.bat` hoặc **nhấp đúp chuột vào file `dev.bat`** để chạy ngay).*
-
-#### ⚡ Lệnh này sẽ tự động:
-1. 🐘 **Khởi động CSDL PostgreSQL** ngầm trong Docker (`ecotrack_postgres` - cổng 5432).
-2. 🧠 **Khởi động AI Service (FastAPI)** tại `http://localhost:8000` (XGBoost, Isolation Forest & Copilot).
-3. 🔌 **Khởi động Backend API Gateway (Express.js)** tại `http://localhost:5000` (Prisma ORM, CRUD, In-memory cache).
-4. 💻 **Khởi động Frontend React Vite** tại `http://localhost:3000` (Hot-Reload tức thì).
+#### ⚡ Lệnh này sẽ chạy trực tiếp 3 dịch vụ bằng dòng lệnh (không dùng docker):
+- 🟣 **`[AI]`**: Pure Python FastAPI tại `http://localhost:8000` (XGBoost, Isolation Forest & Copilot).
+- 🟢 **`[BACKEND]`**: Express.js Gateway tại `http://localhost:5000` (Prisma ORM, CRUD, In-memory cache).
+- 🔵 **`[FRONTEND]`**: React Vite tại `http://localhost:3000` (Hot-Reload tức thì khi sửa code).
 
 | Dịch vụ | URL / Địa chỉ | Chức năng |
 | :--- | :--- | :--- |
 | 💻 **Dashboard UI** | **http://localhost:3000** | Giao diện giám sát năng lượng, biểu đồ & AI Copilot |
 | 🔌 **Backend API** | **http://localhost:5000** | Express.js API Gateway, CRUD, Cache TTL & Proxy |
 | 🧠 **AI Service** | **http://localhost:8000** | Pure Python FastAPI — ML Inference & ReAct Copilot |
-| 📚 **AI Docs** | **http://localhost:8000/docs** | Swagger Docs tài liệu kiểm thử AI Engine |
+| 📚 **AI Swagger Docs** | **http://localhost:8000/docs** | Swagger Docs tài liệu kiểm thử AI Engine |
 | 🗄️ **PostgreSQL DB** | `localhost:5432` | DB: `ecotrack` \| User: `ecotrack` \| Pass: `ecotrack_secret` |
+| 🖥️ **Prisma Studio** | `http://localhost:5555` | Giao diện quản lý CSDL |
 
 > 💡 **Cách dừng hệ thống:** Nhấn **`Ctrl + C`** tại cửa sổ Terminal đang chạy.
+> 
+> 🐳 **Muốn chạy kèm tự động bật Docker DB:** Dùng lệnh `npm run dev:docker`.  
+> 🐳 **Muốn chạy Full 4 Containers qua Docker Compose:** Dùng lệnh `docker compose up`.
+
+---
+
+### Bước 4: Chạy kiểm thử tự động (Automated Testing)
+
+```bash
+# Chạy toàn bộ 51 tests (Pytest + Vitest)
+npm test
+
+# Hoặc kiểm thử riêng từng phần:
+npm run test:backend   # 20 tests Vitest (Express Gateway)
+npm run test:ai        # 31 tests Pytest (AI ML Engine)
+```
 
 ---
 
@@ -130,17 +160,17 @@ EcoTrack Monorepo
 
 ## 🛠️ Công cụ hỗ trợ phát triển (Developer Tools)
 
-- **Nạp dữ liệu mẫu vào CSDL:**
+- **Quản lý CSDL trực quan trên Web (Prisma Studio):**
   ```bash
-  python backend/seed_data.py
+  npm run db:studio
   ```
-- **Chạy Stream Telemetry Worker (Mô phỏng đồng hồ thông minh):**
+- **Chạy Stream Telemetry Worker (Mô phỏng IoT telemetry):**
   ```bash
-  python backend/src/data_pipeline/stream_worker.py
+  python ai-service/src/data_pipeline/stream_worker.py
   ```
-- **Chạy kiểm thử tự động toàn bộ backend:**
+- **Chạy kiểm thử toàn diện:**
   ```bash
-  pytest backend/tests -v
+  npm test
   ```
 
 ---
