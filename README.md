@@ -121,32 +121,27 @@ EcoTrack Monorepo
 
 ---
 
-## 🔬 Nghiên cứu Khoa học (NCKH) & Benchmarks
+## 🛠️ Công cụ hỗ trợ phát triển (Developer Tools)
 
-Hệ thống tích hợp đầy đủ module XAI và các bài kiểm thử thực nghiệm:
-- **Explainable AI (SHAP TreeExplainer):** `backend/src/models/explainability.py`
-- **Đánh giá Chỉ số Giảm thiểu Báo giả (FPR, Precision, Recall, F1):** `backend/src/models/evaluation_metrics.py`
-- **Lệnh chạy thực nghiệm SHAP & FPR:**
-  ```bash
-  python backend/experiments/run_xai_and_evaluation.py
-  ```
-- **Lệnh nạp dữ liệu mẫu sạch:**
+- **Nạp dữ liệu mẫu vào CSDL:**
   ```bash
   python backend/seed_data.py
   ```
-- **Lệnh chạy Stream Telemetry Worker:**
+- **Chạy Stream Telemetry Worker (Mô phỏng đồng hồ thông minh):**
   ```bash
   python backend/src/data_pipeline/stream_worker.py
+  ```
+- **Chạy kiểm thử tự động toàn bộ backend:**
+  ```bash
+  pytest backend/tests -v
   ```
 
 ---
 
-## 📄 Tài liệu dự án
+## 📄 Tài liệu thiết kế dự án
 
 | Tài liệu | Đường dẫn | Mô tả |
 | :--- | :--- | :--- |
-| 📘 **Hướng dẫn Cài đặt & Vận hành Chi tiết** | [`docs/SETUP_AND_USAGE_GUIDE.md`](docs/SETUP_AND_USAGE_GUIDE.md) | **Hướng dẫn toàn diện từ A-Z, NCKH & Docker** |
-| 📝 **Bản thảo Báo cáo Khoa học (Draft)** | [`docs/ECOTRACK_SCIENTIFIC_REPORT_DRAFT.md`](docs/ECOTRACK_SCIENTIFIC_REPORT_DRAFT.md) | Bản thảo bài báo NCKH theo chuẩn IEEE/Scopus |
-| 📊 **Case Studies Benchmark** | [`docs/CASE_STUDIES_BENCHMARK.md`](docs/CASE_STUDIES_BENCHMARK.md) | 4 Kịch bản kiểm thử dị thường FDD thực tế |
-| 📋 **PRD** | `_bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/prd.md` | Tài liệu yêu cầu sản phẩm |
+| 📋 **PRD** | `_bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/prd.md` | Tài liệu đặc tả yêu cầu sản phẩm |
 | 🏛️ **Architecture Spine** | `_bmad-output/planning-artifacts/architecture/architecture-EcoTrack-2026-09-23/ARCHITECTURE-SPINE.md` | Thiết kế kiến trúc kỹ thuật hệ thống |
+| 🔧 **Technical Addendum** | `_bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/addendum.md` | Phụ lục kỹ thuật và chuẩn tích hợp |

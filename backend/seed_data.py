@@ -1,5 +1,5 @@
 """
-Database Seeding Script for EcoTrack (NCKH & Production Setup).
+Database Seeding Script for EcoTrack (Development & Production Setup).
 Initializes database tables, creates default monitored buildings,
 and seeds initial clean baseline telemetry readings from BDG2 / ASHRAE dataset.
 
@@ -79,7 +79,7 @@ if __name__ == "__main__":
         pass
 
     print("=" * 70)
-    print("🌱 ECOTRACK DATABASE SEEDER (NCKH & DEV DEMO)")
+    print("🌱 ECOTRACK DATABASE SEEDER (SAMPLE TELEMETRY)")
     print("=" * 70)
     seed_database()
     print("=" * 70)
