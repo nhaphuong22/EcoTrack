@@ -1,0 +1,77 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Building {
+  id             String          @id @db.VarChar(50)
+  name           String          @db.VarChar(100)
+  building_type  String          @default("Office") @map("building_type") @db.VarChar(50)
+  total_area_sqm Float?          @map("total_area_sqm")
+  location       String?         @db.VarChar(100)
+  timezone       String          @default("UTC") @db.VarChar(50)
+  created_at     DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  meter_readings MeterReading[]
+  anomaly_events AnomalyEvent[]
+  conversations  Conversation[]
+
+  @@map("buildings")
+}
+
+model MeterReading {
+  id                    Int      @id @default(autoincrement())
+  building_id           String   @map("building_id") @db.VarChar(50)
+  timestamp             DateTime @db.Timestamptz
+  meter_reading_kwh     Float    @map("meter_reading_kwh")
+  outdoor_temperature_c Float?   @map("outdoor_temperature_c")
+  relative_humidity_pct Float?   @map("relative_humidity_pct")
+  recorded_at           DateTime @default(now()) @map("recorded_at") @db.Timestamptz
+
+  building Building @relation(fields: [building_id], references: [id], onDelete: Cascade)
+
+  @@index([building_id, timestamp], map: "ix_meter_readings_bldg_ts")
+  @@index([building_id], map: "ix_meter_readings_building_id")
+  @@index([timestamp], map: "ix_meter_readings_timestamp")
+  @@map("meter_readings")
+}
+
+model AnomalyEvent {
+  id               String   @id @db.VarChar(50)
+  building_id      String   @map("building_id") @db.VarChar(50)
+  timestamp        DateTime @db.Timestamptz
+  actual_reading   Float    @map("actual_reading")
+  anomaly_score    Float    @map("anomaly_score")
+  severity         String   @db.VarChar(20)
+  suggested_action String?  @map("suggested_action") @db.Text
+  status           String   @default("OPEN") @db.VarChar(20)
+  detected_at      DateTime @default(now()) @map("detected_at") @db.Timestamptz
+
+  building Building @relation(fields: [building_id], references: [id], onDelete: Cascade)
+
+  @@index([building_id, timestamp], map: "ix_anomaly_events_bldg_ts")
+  @@index([status], map: "ix_anomaly_events_status")
+  @@index([building_id], map: "ix_anomaly_events_building_id")
+  @@index([timestamp], map: "ix_anomaly_events_timestamp")
+  @@map("anomaly_events")
+}
+
+model Conversation {
+  id          Int      @id @default(autoincrement())
+  building_id String?  @map("building_id") @db.VarChar(50)
+  session_id  String   @map("session_id") @db.VarChar(50)
+  role        String   @db.VarChar(20)
+  message     String   @db.Text
+  created_at  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  building Building? @relation(fields: [building_id], references: [id], onDelete: Cascade)
+
+  @@index([session_id, created_at], map: "ix_conversations_session_created")
+  @@index([session_id], map: "ix_conversations_session_id")
+  @@index([building_id], map: "ix_conversations_building_id")
+  @@map("conversations")
+}

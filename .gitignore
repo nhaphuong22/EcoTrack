@@ -46,5 +46,7 @@ data/raw/
 .claude/
 _bmad-output/test-artifacts/
 _bmad-output/party-mode/
-# 6. Folder tai lieu
+# 6. Folder tai lieu & Logging
 docs/
+experiments/
+**/experiments/
