@@ -1,9 +1,16 @@
 import os
+import sys
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-load_dotenv()
+# Ensure ai-service root is in sys.path so `src...` imports work from any working directory
+AI_SERVICE_DIR = Path(__file__).resolve().parent.parent
+if str(AI_SERVICE_DIR) not in sys.path:
+    sys.path.insert(0, str(AI_SERVICE_DIR))
+
+load_dotenv(AI_SERVICE_DIR / ".env")
 
 from src.api.routers import energy, forecast, anomalies, copilot
 
@@ -40,3 +47,10 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    host = os.getenv("HOST", "0.0.0.0")
+    print(f"Starting EcoTrack AI Service at http://{host}:{port} ...")
+    uvicorn.run("src.main:app", host=host, port=port, reload=True)
