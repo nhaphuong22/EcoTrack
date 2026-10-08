@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 from src.models.train_models import get_default_paths
 
-# ponytail: simple env readers, no pydantic BaseSettings class
 
 def get_tariff_rate_vnd() -> float:
     return float(os.getenv("TARIFF_RATE_VND", "3100"))

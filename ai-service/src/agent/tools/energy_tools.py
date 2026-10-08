@@ -28,10 +28,10 @@ def get_anomalies(limit: int = 5) -> List[Dict[str, Any]]:
     df = data_loader.get_or_create_data()
     df_fc = energy_forecaster.predict_horizon(df)
     df_anom = anomaly_detector.detect_anomalies(df_fc)
-
+    
     anom_rows = df_anom[df_anom["is_anomaly"]].tail(limit)
     events = []
-
+    
     for idx, row in anom_rows.iterrows():
         events.append({
             "id": f"ANOM-{idx}",
@@ -42,24 +42,23 @@ def get_anomalies(limit: int = 5) -> List[Dict[str, Any]]:
             "predicted_kwh": float(row["predicted_kwh"]),
             "delta_kwh": round(float(row["residual"]), 1),
             "outdoor_temp_c": float(row["outdoor_temperature_c"]),
-            "reason": row["anomaly_reason"] or "Độ lệch phụ tải bất thường không giải thích bằng nhiệt độ",
+            "reason": row["anomaly_reason"] or "Độ lệch phụ tải bất thường không giải thích bằng nhiệt độ"
         })
     return events
-
 
 def query_forecast_summary() -> Dict[str, Any]:
     """Truy vấn thông tin tóm tắt dự báo phụ tải điện 24 giờ tới."""
     df = data_loader.get_or_create_data()
     df_fc = energy_forecaster.predict_horizon(df)
     last_24h = df_fc.tail(24)
-
+    
     max_row = last_24h.loc[last_24h["predicted_kwh"].idxmax()]
     return {
         "forecast_horizon": "24 hours",
         "expected_peak_kw": float(max_row["predicted_kwh"]),
         "peak_timestamp": max_row["timestamp"],
         "average_forecast_kwh": round(float(last_24h["predicted_kwh"].mean()), 1),
-        "confidence_interval_95": "±16.7 kW",
+        "confidence_interval_95": "±16.7 kW"
     }
 
 

@@ -96,9 +96,12 @@ def test_api_forecast_predict(client):
 
 def test_api_anomalies_detect(client):
     """Verify internal anomaly detection endpoint."""
+    from src.config import get_tariff_rate_vnd
     response = client.get("/internal/anomalies/detect")
     assert response.status_code == 200
     events = response.json()
     assert isinstance(events, list)
     assert len(events) > 0
     assert "severity" in events[0]
+    first = events[0]
+    assert first["estimated_waste_vnd"] == round(first["delta_kwh"] * get_tariff_rate_vnd(), 0)

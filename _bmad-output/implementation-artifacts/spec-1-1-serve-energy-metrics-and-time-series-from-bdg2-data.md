@@ -111,3 +111,33 @@ context:
 - `cd ai-service && python -m pytest -q` -- expected: all tests pass, including `tests/test_serving_frame.py`.
 - `cd ai-service && python -c "from src.data_pipeline.serving_frame import get_serving_frame; f = get_serving_frame(); print(len(f), list(f.columns))"` -- expected: `720` and the ten columns, using the local BDG2 data.
 - `npm run test --prefix backend` -- expected: unchanged, all pass.
+
+### Review Findings
+
+Independent 4-layer adversarial review (blind-hunter, edge-case-hunter, verification-gap, acceptance-auditor), 2026-10-08. 0 decision-needed, 5 patch, 2 deferred, 10 rejected.
+
+**Patch:**
+
+- [x] [Review][Patch] Dead `except` branch + leftover `# ponytail` marker comment [`ai-service/src/data_pipeline/serving_frame.py`:63-66, `ai-service/src/config.py`:5] — the `if isinstance(e, (ServingDataError, ModelArtifactError)): raise` guard wraps only `json.load`/`joblib.load`, which never raise those types, so the branch is unreachable; the `# ponytail:` comment is a leftover codename. Delete both.
+- [x] [Review][Patch] Cosmetic churn in functions the spec said not to touch [`ai-service/src/agent/tools/energy_tools.py`:26-47, 50-63] — `get_anomalies` and `query_forecast_summary` (owned by Stories 1.2/1.3) got whitespace edits and trailing commas despite the "Never" boundary. Behaviour is unchanged; revert the churn to shrink merge surface for those stories.
+- [x] [Review][Patch] `/internal/anomalies/detect` tariff cost is unasserted [`ai-service/tests/test_smoke.py`:97-104] — `test_api_anomalies_detect` checks only status and `severity`; a wrong tariff on `estimated_waste_vnd`/`_usd` would ship. Assert one event's `estimated_waste_vnd == round(delta_kwh * get_tariff_rate_vnd(), 0)`.
+- [x] [Review][Patch] `calculate_waste_cost` copilot tool has no test [`ai-service/src/agent/tools/energy_tools.py`:66-75] — no test references it; assert the VND/USD computation and the `duration_hours` scaling.
+- [x] [Review][Patch] `query_metrics` key remapping is value-unverified [`ai-service/tests/test_serving_frame.py` (test_copilot_tool_query_metrics)] — the test checks only the key set, so a crossed mapping (e.g. `baseline_kwh` sourced from the wrong metric) passes silently. Add value assertions tying each remapped key to the serving frame.
+
+**Deferred:**
+
+- [x] [Review][Defer] `/metrics` and `/anomalies` computed over different frames (medium) [`ai-service/src/api/routers/energy.py` vs `ai-service/src/api/routers/anomalies.py`] — deferred: `/metrics` + `query_metrics` now use the 720h replayed real-data serving frame while `/anomalies/detect`, `get_anomalies` and `query_forecast_summary` still use the old synthetic `data_loader` pipeline, so the dashboard's `total_anomalies_detected` will not match the anomaly list. The spec's "Temporary mix" note accepts this and forbids changing `anomalies.py` beyond tariff; Story 1.3 unifies the anomaly path.
+- [x] [Review][Defer] Heuristic RCA cost line untested [`ai-service/src/agent/orchestrator.py`:142] — deferred: the heuristic fallback interpolates `delta_kwh * get_tariff_rate_vnd()` into user-visible chat text with no test; demo-template text rather than a contract, lower value than the endpoint/tool gaps.
+
+**Rejected:**
+
+- `false` — Humidity + `anomaly_reason` served as `null` in timeseries (blind-hunter, edge-case-hunter): the spec I/O matrix mandates `null` for both fields and the design note states the frontend reads neither; the proposed fix would contradict the spec under review.
+- `false` — Naive/aware timestamp subtraction raises `TypeError` (edge-case-hunter): `load_dataset` builds timestamps with `pd.to_datetime` on a tz-less CSV, so `base_df` timestamps are naive and `now_hour.replace(tzinfo=None) - src_end_ts` is naive−naive; no `TypeError`.
+- `false` — Fixture CSV missing from the diff (blind-hunter): an artifact of the review's diff scoping; the 2,160-row `tests/fixtures/office_building_sample.csv` is committed in `c6cefda`.
+- `low` — Serving frame can return <720 rows (blind-hunter, edge-case-hunter): with the shipped fixture (2,160 rows) and real data (17k) a weekday/hour match at index ≥719 always exists, so the short-window branch is unreachable in everyday use and the fix adds a guard.
+- `low` — Hourly contiguity assumed (blind-hunter): the processed BDG2 series is interpolated to be contiguous, so the non-uniform-series path is latent; fix adds gap handling.
+- `low` — Non-numeric tariff env → `ValueError` → 500 (blind-hunter, edge-case-hunter): requires an operator to set a non-numeric `TARIFF_RATE_*`; fix adds try/except.
+- `low` — Malformed `model_metadata.json` keys → `KeyError` → 500 not 503 (edge-case-hunter): reachable only with a corrupted committed metadata file; fix adds key guards.
+- `low` — Missing dataset columns → `KeyError` → 500 (edge-case-hunter): reachable only with a wrong dataset schema; the fixture has the correct columns; fix adds column guards.
+- `low` — 503 error detail leaks absolute filesystem paths (blind-hunter): the spec I/O matrix explicitly requires naming the path/file, and the endpoints are `/internal` behind the gateway; revisit as hardening when Epic 5 relays errors to clients.
+- `low` — Global `_lock` serializes heavy work (blind-hunter): the cold-start cost is one-time and hour-rollover holds the lock only for a ~720-row slice; negligible in everyday use and the fix is a non-trivial locking refactor.

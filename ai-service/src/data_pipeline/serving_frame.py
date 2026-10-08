@@ -61,8 +61,6 @@ def _load_artifacts_and_base_frame(data_path: Path, models_dir: Path) -> Tuple[p
         xgb_model = joblib.load(xgb_path)
         iso_model = joblib.load(iso_path)
     except Exception as e:
-        if isinstance(e, (ServingDataError, ModelArtifactError)):
-            raise
         raise ModelArtifactError(f"Failed to load model artifact: {e}", file_path=str(models_dir))
 
     raw_df = load_dataset(data_path)

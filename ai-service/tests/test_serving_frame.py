@@ -219,7 +219,9 @@ def test_tariff_override():
 
 
 def test_copilot_tool_query_metrics():
-    """Verify query_metrics tool returns matching metrics with copilot keys."""
+    """Verify query_metrics tool returns matching metrics with copilot keys and exact values."""
+    frame = get_serving_frame()
+    expected = compute_energy_metrics(frame)
     metrics = query_metrics()
     expected_tool_keys = {
         "building_id",
@@ -232,4 +234,22 @@ def test_copilot_tool_query_metrics():
         "estimated_waste_usd",
     }
     assert set(metrics.keys()) == expected_tool_keys
-    assert metrics["building_id"] == "office_tower_01"
+    assert metrics["building_id"] == expected["building_id"]
+    assert metrics["total_consumption_kwh"] == expected["total_consumption_kwh"]
+    assert metrics["peak_demand_kw"] == expected["peak_demand_kw"]
+    assert metrics["baseline_kwh"] == expected["predicted_baseline_kwh"]
+    assert metrics["anomalies_detected"] == expected["total_anomalies_detected"]
+    assert metrics["estimated_waste_kwh"] == expected["estimated_waste_kwh"]
+    assert metrics["estimated_waste_vnd"] == expected["estimated_waste_cost_vnd"]
+    assert metrics["estimated_waste_usd"] == expected["estimated_waste_cost_usd"]
+
+
+def test_calculate_waste_cost():
+    """Verify calculate_waste_cost tool calculates VND and USD scaling with duration_hours."""
+    from src.agent.tools.energy_tools import calculate_waste_cost
+    from src.config import get_tariff_rate_usd, get_tariff_rate_vnd
+
+    res = calculate_waste_cost(delta_kwh=15.0, duration_hours=2.0)
+    assert res["excess_kwh"] == 30.0
+    assert res["cost_vnd"] == round(30.0 * get_tariff_rate_vnd(), 0)
+    assert res["cost_usd"] == round(30.0 * get_tariff_rate_usd(), 2)
