@@ -1,43 +1,37 @@
-from typing import Dict, Any, List
+from typing import Any, Dict, List
+
+from src.config import get_tariff_rate_usd, get_tariff_rate_vnd
 from src.data_pipeline.bdg2_loader import data_loader
-from src.models.forecaster_xgboost import energy_forecaster
+from src.data_pipeline.serving_frame import compute_energy_metrics, get_serving_frame
 from src.models.anomaly_isolation_forest import anomaly_detector
+from src.models.forecaster_xgboost import energy_forecaster
+
 
 def query_metrics() -> Dict[str, Any]:
     """Truy vấn các chỉ số điện năng tổng quan của tòa nhà."""
-    df = data_loader.get_or_create_data()
-    df_fc = energy_forecaster.predict_horizon(df)
-    df_anom = anomaly_detector.detect_anomalies(df_fc)
-    
-    total_kwh = float(df_anom["meter_reading_kwh"].sum())
-    peak_kw = float(df_anom["meter_reading_kwh"].max())
-    baseline_kwh = float(df_anom["predicted_kwh"].sum())
-    anom_count = int(df_anom["is_anomaly"].sum())
-    
-    waste_kwh = float(df_anom[df_anom["is_anomaly"]]["residual"].clip(lower=0).sum())
-    waste_vnd = waste_kwh * 3100
-    waste_usd = waste_kwh * 0.125
-    
+    frame = get_serving_frame()
+    metrics = compute_energy_metrics(frame)
     return {
-        "building_id": "office_tower_01",
-        "total_consumption_kwh": round(total_kwh, 1),
-        "peak_demand_kw": round(peak_kw, 1),
-        "baseline_kwh": round(baseline_kwh, 1),
-        "anomalies_detected": anom_count,
-        "estimated_waste_kwh": round(waste_kwh, 1),
-        "estimated_waste_vnd": round(waste_vnd, 0),
-        "estimated_waste_usd": round(waste_usd, 2)
+        "building_id": metrics["building_id"],
+        "total_consumption_kwh": metrics["total_consumption_kwh"],
+        "peak_demand_kw": metrics["peak_demand_kw"],
+        "baseline_kwh": metrics["predicted_baseline_kwh"],
+        "anomalies_detected": metrics["total_anomalies_detected"],
+        "estimated_waste_kwh": metrics["estimated_waste_kwh"],
+        "estimated_waste_vnd": metrics["estimated_waste_cost_vnd"],
+        "estimated_waste_usd": metrics["estimated_waste_cost_usd"],
     }
+
 
 def get_anomalies(limit: int = 5) -> List[Dict[str, Any]]:
     """Truy vấn danh sách các điểm và sự kiện bất thường gần nhất."""
     df = data_loader.get_or_create_data()
     df_fc = energy_forecaster.predict_horizon(df)
     df_anom = anomaly_detector.detect_anomalies(df_fc)
-    
+
     anom_rows = df_anom[df_anom["is_anomaly"]].tail(limit)
     events = []
-    
+
     for idx, row in anom_rows.iterrows():
         events.append({
             "id": f"ANOM-{idx}",
@@ -57,7 +51,7 @@ def query_forecast_summary() -> Dict[str, Any]:
     df = data_loader.get_or_create_data()
     df_fc = energy_forecaster.predict_horizon(df)
     last_24h = df_fc.tail(24)
-    
+
     max_row = last_24h.loc[last_24h["predicted_kwh"].idxmax()]
     return {
         "forecast_horizon": "24 hours",
@@ -67,13 +61,14 @@ def query_forecast_summary() -> Dict[str, Any]:
         "confidence_interval_95": "±16.7 kW"
     }
 
+
 def calculate_waste_cost(delta_kwh: float, duration_hours: float = 1.0) -> Dict[str, Any]:
     """Tính toán chi phí lãng phí điện năng dựa trên kWh chênh lệch."""
     total_waste_kwh = delta_kwh * duration_hours
-    vnd = total_waste_kwh * 3100
-    usd = total_waste_kwh * 0.125
+    vnd = total_waste_kwh * get_tariff_rate_vnd()
+    usd = total_waste_kwh * get_tariff_rate_usd()
     return {
         "excess_kwh": round(total_waste_kwh, 1),
         "cost_vnd": round(vnd, 0),
-        "cost_usd": round(usd, 2)
+        "cost_usd": round(usd, 2),
     }

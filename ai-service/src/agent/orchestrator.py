@@ -2,6 +2,7 @@ import os
 import json
 import time
 from typing import Dict, Any, List, Tuple
+from src.config import get_tariff_rate_usd, get_tariff_rate_vnd
 from src.agent.prompts import SYSTEM_PROMPT
 from src.agent.tools.energy_tools import (
     query_metrics,
@@ -138,7 +139,7 @@ class CopilotOrchestrator:
 #### 🔎 Phân tích nguyên nhân gốc rễ (RCA)
 1. **Lệch pha chu kỳ**: Sự cố xảy ra ngoài giờ vận hành chính (Building unoccupied), nhưng phụ tải chiller và quạt thông gió vẫn duy trì ở công suất tương đương giờ cao điểm.
 2. **Nguyên nhân tiềm ẩn**: {top_anom['reason']}.
-3. **Tổn thất chi phí**: Ước tính gây lãng phí khoảng **{top_anom['delta_kwh'] * 3100:,.0f} VNĐ** (~${top_anom['delta_kwh'] * 0.125:.2f} USD) cho mỗi giờ duy trì sự cố.
+3. **Tổn thất chi phí**: Ước tính gây lãng phí khoảng **{top_anom['delta_kwh'] * get_tariff_rate_vnd():,.0f} VNĐ** (~${top_anom['delta_kwh'] * get_tariff_rate_usd():.2f} USD) cho mỗi giờ duy trì sự cố.
 
 #### 💡 Khuyến nghị cho Kỹ sư vận hành
 - [ ] Kiểm tra actuator và van damper gió tươi tại buồng AHU tầng kỹ thuật.

@@ -3,7 +3,10 @@ import sys
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
+
+from src.data_pipeline.serving_frame import ModelArtifactError, ServingDataError
 
 # Ensure ai-service root is in sys.path so `src...` imports work from any working directory
 AI_SERVICE_DIR = Path(__file__).resolve().parent.parent
@@ -34,6 +37,22 @@ app.include_router(energy.router)
 app.include_router(forecast.router)
 app.include_router(anomalies.router)
 app.include_router(copilot.router)
+
+
+@app.exception_handler(ServingDataError)
+async def serving_data_error_handler(request, exc: ServingDataError):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": str(exc), "code": "ERR_DATA_NOT_FOUND"},
+    )
+
+
+@app.exception_handler(ModelArtifactError)
+async def model_artifact_error_handler(request, exc: ModelArtifactError):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": str(exc), "code": "ERR_MODEL_NOT_FOUND"},
+    )
 
 @app.get("/")
 def root():
