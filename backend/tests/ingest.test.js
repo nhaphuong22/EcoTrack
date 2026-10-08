@@ -122,6 +122,34 @@ describe('POST /api/v1/ingest/readings', () => {
     expect(res.body.stored).toBe(2);
   });
 
+  it('persists zoneless building-level readings with zone_id: null', async () => {
+    mockPrisma.meterReading.createMany.mockResolvedValue({ count: 1 });
+
+    const res = await request(app)
+      .post('/api/v1/ingest/readings')
+      .set('X-Ingest-Key', VALID_KEY)
+      .send([
+        {
+          building_id: 'office_tower_01',
+          timestamp: '2026-10-08T12:00:00Z',
+          meter_reading_kwh: 120.0,
+        },
+      ]);
+
+    expect(res.status).toBe(201);
+    expect(res.body.stored).toBe(1);
+    expect(mockPrisma.meterReading.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          building_id: 'office_tower_01',
+          zone_id: null,
+          meter_reading_kwh: 120.0,
+        }),
+      ],
+      skipDuplicates: true,
+    });
+  });
+
   it('handles duplicates via skipDuplicates without error', async () => {
     mockPrisma.meterReading.createMany.mockResolvedValue({ count: 0 });
 

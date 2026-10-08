@@ -16,9 +16,9 @@ const ReadingItemSchema = z.object({
 });
 
 const IngestBatchSchema = z.union([
-  z.array(ReadingItemSchema).min(1),
+  z.array(ReadingItemSchema).min(1).max(1000),
   z.object({
-    readings: z.array(ReadingItemSchema).min(1),
+    readings: z.array(ReadingItemSchema).min(1).max(1000),
   }).transform((val) => val.readings),
 ]);
 

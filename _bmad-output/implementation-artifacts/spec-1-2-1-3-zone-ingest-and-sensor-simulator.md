@@ -85,6 +85,12 @@ context:
 - Given the migration on a DB with duplicate readings, when applied, then duplicates are removed before the constraints are added and re-applying is idempotent.
 - Given the simulator against a running gateway, when started, then `meter_readings` gains ~10 rows every 2–5 s and the rows carry distinct `zone_id`s.
 
+### Review Findings
+
+- [x] [Review][Patch] Limit maximum batch size in IngestBatchSchema (`backend/src/routes/ingest.js:19`)
+- [x] [Review][Patch] Add test coverage for zoneless building-level readings (`backend/tests/ingest.test.js:125`)
+- [x] [Review][Patch] Add test coverage for runSimulator with once flag (`backend/tests/simulator.test.js:84`)
+
 ## Implementation Notes
 
 - Added `Zone` model and `zone_id` optional field to `MeterReading` in `schema.prisma`.

@@ -4,6 +4,7 @@ import {
   loadDataRows,
   generateBatch,
   sendBatch,
+  runSimulator,
   parseArgs,
 } from '../src/simulator/runSimulator';
 
@@ -77,5 +78,19 @@ describe('Sensor Simulator Bot (runSimulator)', () => {
     const result = await sendBatch(batch, options);
     expect(result.success).toBe(false);
     expect(result).toHaveProperty('error');
+  });
+
+  it('runs one tick and completes cleanly when once is set', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await runSimulator({
+      gatewayUrl: 'http://localhost:59999',
+      once: true,
+      intervalMs: 100,
+    });
+
+    logSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 });
