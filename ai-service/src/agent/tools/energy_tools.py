@@ -28,10 +28,10 @@ def get_anomalies(limit: int = 5) -> List[Dict[str, Any]]:
     df = data_loader.get_or_create_data()
     df_fc = energy_forecaster.predict_horizon(df)
     df_anom = anomaly_detector.detect_anomalies(df_fc)
-    
+
     anom_rows = df_anom[df_anom["is_anomaly"]].tail(limit)
     events = []
-    
+
     for idx, row in anom_rows.iterrows():
         events.append({
             "id": f"ANOM-{idx}",
@@ -51,7 +51,7 @@ def query_forecast_summary() -> Dict[str, Any]:
     df = data_loader.get_or_create_data()
     df_fc = energy_forecaster.predict_horizon(df)
     last_24h = df_fc.tail(24)
-    
+
     max_row = last_24h.loc[last_24h["predicted_kwh"].idxmax()]
     return {
         "forecast_horizon": "24 hours",
