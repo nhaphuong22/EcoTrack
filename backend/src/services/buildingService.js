@@ -19,6 +19,13 @@ const DEFAULT_BUILDINGS = [
   },
 ];
 
+const DEFAULT_ZONES_OFFICE_01 = Array.from({ length: 10 }, (_, i) => ({
+  id: `z${i + 1}`,
+  building_id: 'office_tower_01',
+  floor: 1,
+  name: `Tầng 1 - Phòng ${101 + i}`,
+}));
+
 let isSeeded = false;
 
 async function seedDefaultBuildingsIfNeeded() {
@@ -31,6 +38,15 @@ async function seedDefaultBuildingsIfNeeded() {
         create: b,
       });
       await seedInitialReadingsIfNeeded(b.id);
+    }
+    if (prisma.zone && typeof prisma.zone.upsert === 'function') {
+      for (const z of DEFAULT_ZONES_OFFICE_01) {
+        await prisma.zone.upsert({
+          where: { id: z.id },
+          update: {},
+          create: z,
+        });
+      }
     }
     isSeeded = true;
   } catch (err) {
@@ -134,6 +150,50 @@ async function getBuildingHistory(buildingId, limit = 168) {
   };
 }
 
+async function listZonesWithLatest(buildingId) {
+  await seedDefaultBuildingsIfNeeded();
+  const building = await prisma.building.findUnique({
+    where: { id: buildingId },
+  });
+
+  if (!building) return null;
+
+  const zones = await prisma.zone.findMany({
+    where: { building_id: buildingId },
+    include: {
+      meter_readings: {
+        orderBy: { timestamp: 'desc' },
+        take: 1,
+      },
+    },
+    orderBy: { id: 'asc' },
+  });
+
+  return {
+    building_id: buildingId,
+    total: zones.length,
+    zones: zones.map((z) => {
+      const latest = z.meter_readings && z.meter_readings.length > 0 ? z.meter_readings[0] : null;
+      const reading = latest || z.latest_reading || null;
+      return {
+        id: z.id,
+        building_id: z.building_id,
+        floor: z.floor,
+        name: z.name,
+        created_at: z.created_at,
+        latest_reading: reading
+          ? {
+              timestamp: reading.timestamp instanceof Date ? reading.timestamp.toISOString() : reading.timestamp,
+              meter_reading_kwh: reading.meter_reading_kwh,
+              outdoor_temperature_c: reading.outdoor_temperature_c ?? null,
+              relative_humidity_pct: reading.relative_humidity_pct ?? null,
+            }
+          : null,
+      };
+    }),
+  };
+}
+
 module.exports = {
   seedDefaultBuildingsIfNeeded,
   seedInitialReadingsIfNeeded,
@@ -141,4 +201,5 @@ module.exports = {
   getBuildingById,
   createBuilding,
   getBuildingHistory,
+  listZonesWithLatest,
 };

@@ -8,6 +8,7 @@ const energyRouter = require('./routes/energy');
 const forecastRouter = require('./routes/forecast');
 const anomaliesRouter = require('./routes/anomalies');
 const copilotRouter = require('./routes/copilot');
+const ingestRouter = require('./routes/ingest');
 
 const app = express();
 
@@ -34,6 +35,7 @@ app.use('/api/v1/energy', energyRouter);
 app.use('/api/v1/forecast', forecastRouter);
 app.use('/api/v1/anomalies', anomaliesRouter);
 app.use('/api/v1/copilot', copilotRouter);
+app.use('/api/v1/ingest', ingestRouter);
 
 // Global Error Handler
 app.use(errorHandler);

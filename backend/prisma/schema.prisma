@@ -19,13 +19,29 @@ model Building {
   meter_readings MeterReading[]
   anomaly_events AnomalyEvent[]
   conversations  Conversation[]
+  zones          Zone[]
 
   @@map("buildings")
+}
+
+model Zone {
+  id          String   @id @db.VarChar(50)
+  building_id String   @map("building_id") @db.VarChar(50)
+  floor       Int      @default(1)
+  name        String   @db.VarChar(100)
+  created_at  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  building       Building       @relation(fields: [building_id], references: [id], onDelete: Cascade)
+  meter_readings MeterReading[]
+
+  @@index([building_id], map: "ix_zones_building_id")
+  @@map("zones")
 }
 
 model MeterReading {
   id                    Int      @id @default(autoincrement())
   building_id           String   @map("building_id") @db.VarChar(50)
+  zone_id               String?  @map("zone_id") @db.VarChar(50)
   timestamp             DateTime @db.Timestamptz
   meter_reading_kwh     Float    @map("meter_reading_kwh")
   outdoor_temperature_c Float?   @map("outdoor_temperature_c")
@@ -33,9 +49,12 @@ model MeterReading {
   recorded_at           DateTime @default(now()) @map("recorded_at") @db.Timestamptz
 
   building Building @relation(fields: [building_id], references: [id], onDelete: Cascade)
+  zone     Zone?    @relation(fields: [zone_id], references: [id], onDelete: Cascade)
 
+  @@unique([building_id, zone_id, timestamp], map: "uq_meter_readings_bldg_zone_ts")
   @@index([building_id, timestamp], map: "ix_meter_readings_bldg_ts")
   @@index([building_id], map: "ix_meter_readings_building_id")
+  @@index([zone_id], map: "ix_meter_readings_zone_id")
   @@index([timestamp], map: "ix_meter_readings_timestamp")
   @@map("meter_readings")
 }
