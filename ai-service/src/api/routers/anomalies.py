@@ -2,6 +2,7 @@ import asyncio
 from typing import Any, Dict, List
 from fastapi import APIRouter
 
+from src.config import get_tariff_rate_usd, get_tariff_rate_vnd
 from src.data_pipeline.bdg2_loader import data_loader
 from src.models.forecaster_xgboost import energy_forecaster
 from src.models.anomaly_isolation_forest import anomaly_detector
@@ -19,8 +20,8 @@ def _detect_anomalies_pure() -> List[Dict[str, Any]]:
 
     for idx, row in anom_rows.iterrows():
         delta = max(0.0, float(row["meter_reading_kwh"]) - float(row["predicted_kwh"]))
-        cost_vnd = delta * 3100
-        cost_usd = delta * 0.125
+        cost_vnd = delta * get_tariff_rate_vnd()
+        cost_usd = delta * get_tariff_rate_usd()
         events.append({
             "id": f"ANOM-{idx}",
             "building_id": "office_tower_01",
