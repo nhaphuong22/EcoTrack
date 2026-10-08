@@ -1,0 +1,89 @@
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; the status view surfaces open ones
+generated: 10-08-2026 21:56
+last_updated: 10-08-2026 21:56
+project: EcoTrack
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+development_status:
+  epic-1: backlog
+  1-1-serve-energy-metrics-and-time-series-from-bdg2-data: backlog
+  1-2-forecast-the-next-24-hours: backlog
+  1-3-detect-anomalies-on-the-unified-pipeline-and-fail-loudly: backlog
+  1-4-make-copilot-provider-failures-visible: backlog
+  1-5-enforce-the-internal-service-token: backlog
+  1-6-store-each-meter-reading-once: backlog
+  1-7-open-the-copilot-with-the-anomaly-s-context: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-benchmark-harness-with-naive-and-xgboost-baselines: backlog
+  2-2-add-a-statistical-baseline-sarimax: backlog
+  2-3-add-an-lstm-forecaster: backlog
+  2-4-benchmark-report-and-model-recommendation: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-track-training-runs-and-register-the-serving-model: backlog
+  3-2-detect-data-drift-and-accuracy-decay: backlog
+  3-3-measure-anomaly-detector-quality: backlog
+  3-4-retrain-on-demand-with-guarded-promotion: backlog
+  3-5-retrain-automatically-when-the-model-degrades: backlog
+  3-6-report-model-and-drift-status: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-build-a-searchable-energy-knowledge-base: backlog
+  4-2-answer-knowledge-questions-with-cited-sources: backlog
+  4-3-keep-context-across-turns: backlog
+  4-4-stream-copilot-answers-from-the-ai-service: backlog
+  4-5-measure-rag-quality: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-sign-in-with-a-role: backlog
+  5-2-stay-signed-in-and-sign-out: backlog
+  5-3-protect-operations-by-role-and-harden-the-gateway: backlog
+  5-4-ingest-readings-per-zone: backlog
+  5-5-simulate-building-sensors: backlog
+  5-6-push-live-readings-to-clients: backlog
+  5-7-relay-the-streamed-copilot-answer: backlog
+  5-8-expose-model-monitoring-to-admins: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-sign-in-and-navigate-by-role: backlog
+  6-2-see-the-building-live-on-a-floor-plan: backlog
+  6-3-read-streamed-formatted-copilot-answers-with-sources: backlog
+  6-4-monitor-the-model-as-an-admin: backlog
+  6-5-show-real-system-status: backlog
+  epic-6-retrospective: optional
