@@ -71,4 +71,19 @@ router.get('/:id/history', async (req, res, next) => {
   }
 });
 
+// GET /api/v1/buildings/:id/zones
+router.get('/:id/zones', async (req, res, next) => {
+  try {
+    const result = await buildingService.listZonesWithLatest(req.params.id);
+    if (!result) {
+      return res.status(404).json({
+        detail: `Building with id '${req.params.id}' not found.`,
+      });
+    }
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

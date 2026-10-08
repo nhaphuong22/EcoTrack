@@ -37,8 +37,8 @@ story_location: _bmad-output/implementation-artifacts
 development_status:
   epic-1: in-progress
   1-1-serve-energy-metrics-and-time-series-from-bdg2-data: done
-  1-2-simulate-building-sensors: backlog
-  1-3-ingest-readings-per-zone: backlog
+  1-2-simulate-building-sensors: review
+  1-3-ingest-readings-per-zone: review
   1-4-forecast-the-next-24-hours: backlog
   1-5-detect-anomalies-on-the-unified-pipeline-and-fail-loudly: backlog
   1-6-enforce-the-internal-service-token: backlog
