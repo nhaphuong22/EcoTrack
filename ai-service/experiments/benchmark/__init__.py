@@ -11,6 +11,7 @@ from experiments.benchmark.models import (
     get_registered_forecasters,
     register_forecaster,
 )
+from experiments.benchmark.lstm import LSTMForecaster
 from experiments.benchmark.benchmark import run_scoring, score_model
 
 __all__ = [
@@ -18,6 +19,7 @@ __all__ = [
     "SeasonalNaiveForecaster",
     "XGBoostForecaster",
     "SARIMAXForecaster",
+    "LSTMForecaster",
     "register_forecaster",
     "get_registered_forecasters",
     "score_model",

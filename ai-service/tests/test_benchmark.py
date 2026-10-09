@@ -46,7 +46,7 @@ def sample_partitions():
 def test_benchmark_happy_path_schema_and_comparison(sample_partitions, tmp_path):
     """
     Verify happy path execution:
-    - Results table has exactly 3 rows ('seasonal_naive', 'xgboost', 'sarimax').
+    - Results table has exactly 4 rows ('seasonal_naive', 'xgboost', 'sarimax', 'lstm').
     - All 9 standard columns are present, non-null, and finite.
     - XGBoost outperforms Seasonal-naive on MAE and RMSE.
     """
@@ -54,10 +54,10 @@ def test_benchmark_happy_path_schema_and_comparison(sample_partitions, tmp_path)
     results_df = run_scoring(train_df=train_df, test_df=test_df)
 
     assert list(results_df.columns) == BENCHMARK_COLUMNS
-    assert len(results_df) == 3
+    assert len(results_df) == 4
 
     model_names = set(results_df["model"])
-    assert model_names == {"seasonal_naive", "xgboost", "sarimax"}
+    assert model_names == {"seasonal_naive", "xgboost", "sarimax", "lstm"}
 
     # No NaN or infinite values
     for col in BENCHMARK_COLUMNS:
@@ -76,7 +76,7 @@ def test_execute_benchmark_writes_results_csv(tmp_path):
     """
     Verify the end-to-end CLI happy path (AC1 one-command deliverable consumed by Story 4.4):
     - execute_benchmark writes results.csv at the requested output path.
-    - The written file parses back with exactly the 9 standard columns and 3 model rows.
+    - The written file parses back with exactly the 9 standard columns and 4 model rows.
     """
     fixture_path = Path(__file__).resolve().parent / "fixtures" / "office_building_sample.csv"
     output_file = tmp_path / "results.csv"
@@ -87,8 +87,8 @@ def test_execute_benchmark_writes_results_csv(tmp_path):
 
     written_df = pd.read_csv(output_file)
     assert list(written_df.columns) == BENCHMARK_COLUMNS
-    assert len(written_df) == 3
-    assert set(written_df["model"]) == {"seasonal_naive", "xgboost", "sarimax"}
+    assert len(written_df) == 4
+    assert set(written_df["model"]) == {"seasonal_naive", "xgboost", "sarimax", "lstm"}
     assert written_df["model_file_size_bytes"].gt(0).all(), "Every serialized size must be > 0"
 
     # Returned frame matches what was persisted
@@ -144,7 +144,7 @@ def test_benchmark_pluggability(sample_partitions):
         assert any(m.name == "constant_mean" for m in registered)
 
         results_df = run_scoring(train_df=train_df, test_df=test_df)
-        assert len(results_df) == 4
+        assert len(results_df) == 5
         assert "constant_mean" in results_df["model"].values
 
         mean_row = results_df[results_df["model"] == "constant_mean"].iloc[0]
@@ -295,7 +295,7 @@ def test_print_summary_table_lists_every_model_and_window(sample_partitions, cap
 
     sarimax_line = next(line for line in lines if line.startswith("sarimax"))
     assert sarimax_line.rstrip().endswith(str(SARIMAX_TRAIN_WINDOW_HOURS))
-    for name in ("seasonal_naive", "xgboost"):
+    for name in ("seasonal_naive", "xgboost", "lstm"):
         assert any(line.startswith(name) for line in lines)
 
 
