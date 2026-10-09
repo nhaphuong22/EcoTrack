@@ -6,20 +6,20 @@ import ForecastChart from './components/dashboard/ForecastChart';
 import AnomalyTable from './components/dashboard/AnomalyTable';
 import CopilotDrawer from './components/copilot/CopilotDrawer';
 import { useEnergyData } from './hooks/useEnergyData';
+import { useCopilot } from './hooks/useCopilot';
+import { buildAnomalyPrompt } from './lib/copilotPrompt';
+import { API_BASE_URL } from './services/api';
 
 export default function App() {
   const { metrics, timeSeries, anomalies, loading, error, refetch } = useEnergyData(168);
+  const { messages, isLoading: copilotLoading, error: copilotError, sendMessage, clearHistory } = useCopilot();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [pendingPrompt, setPendingPrompt] = useState('');
 
   const handleAskCopilot = useCallback((anomaly) => {
-    setPendingPrompt(
-      `Phân tích sự cố ${anomaly.id} xảy ra lúc ${anomaly.timestamp?.slice(0, 16)} — ` +
-      `phụ tải tăng +${anomaly.delta_kwh} kWh so với baseline, điểm bất thường ${anomaly.anomaly_score?.toFixed(2)}. ` +
-      `Chẩn đoán nguyên nhân và đề xuất hành động xử lý.`
-    );
+    const prompt = buildAnomalyPrompt(anomaly);
+    sendMessage(prompt);
     setDrawerOpen(true);
-  }, []);
+  }, [sendMessage]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
@@ -32,7 +32,7 @@ export default function App() {
             <AlertCircle size={16} />
             <span>
               Không thể tải dữ liệu từ backend ({error}).{' '}
-              Hãy đảm bảo backend đang chạy tại <code className="font-mono text-xs">http://localhost:8000</code>.
+              Hãy đảm bảo backend đang chạy tại <code className="font-mono text-xs">{API_BASE_URL}</code>.
             </span>
           </div>
         )}
@@ -92,8 +92,12 @@ export default function App() {
       {/* Copilot Slide-over Drawer */}
       <CopilotDrawer
         isOpen={drawerOpen}
-        onClose={() => { setDrawerOpen(false); setPendingPrompt(''); }}
-        initialMessage={pendingPrompt}
+        onClose={() => setDrawerOpen(false)}
+        messages={messages}
+        isLoading={copilotLoading}
+        error={copilotError}
+        sendMessage={sendMessage}
+        clearHistory={clearHistory}
       />
     </div>
   );
