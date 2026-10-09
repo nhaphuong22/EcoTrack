@@ -86,6 +86,10 @@ def score_model(
         if tmp_path.exists():
             tmp_path.unlink()
 
+    # Full-data models leave train_window_used as None and report the full train-row count;
+    # windowed models (SARIMAX) report the rows they actually fitted on.
+    train_window = model.train_window_used if model.train_window_used is not None else len(train_df)
+
     return {
         "model": str(model.name),
         "mae_kwh": float(mae),
@@ -95,8 +99,7 @@ def score_model(
         "training_time_s": float(fit_duration_s),
         "mean_inference_latency_ms": float(mean_latency_ms),
         "model_file_size_bytes": int(file_size_bytes),
-        # Full-data models report their full train-row count; SARIMAX reports its recent window.
-        "train_window_hours": int(getattr(model, "train_window_used", len(train_df))),
+        "train_window_hours": int(train_window),
     }
 
 

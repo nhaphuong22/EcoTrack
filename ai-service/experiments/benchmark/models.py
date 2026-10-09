@@ -6,13 +6,17 @@ and a pluggable registry allowing new models to be registered dynamically.
 
 from abc import ABC, abstractmethod
 from typing import Callable, Dict, List, Optional, Type, Union
+import logging
 import warnings
 import numpy as np
 import pandas as pd
 import xgboost as xgb
+from statsmodels.tools.sm_exceptions import ConvergenceWarning
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 from src.models.train_models import XGB_FEATURE_COLUMNS
+
+logger = logging.getLogger("BenchmarkHarness")
 
 
 class BaseForecaster(ABC):
@@ -22,6 +26,10 @@ class BaseForecaster(ABC):
     """
 
     name: str = "base_forecaster"
+
+    # Number of training rows the model actually fitted on, reported as `train_window_hours`.
+    # Leave as None when fit() uses the whole training partition; set it in fit() otherwise.
+    train_window_used: Optional[int] = None
 
     @abstractmethod
     def fit(self, train_df: pd.DataFrame) -> "BaseForecaster":
@@ -130,7 +138,9 @@ class XGBoostForecaster(BaseForecaster):
 SARIMAX_ORDER = (1, 1, 1)
 SARIMAX_SEASONAL_ORDER = (1, 0, 1, 24)
 # SARIMAX is intractable on the full ~14k-row split, so it fits only the most recent window.
-# 336 hours (two weeks hourly) fits in ~1.5s and scores lower MAE than a 720-hour window.
+# Chosen on a validation slice (the last 336 h of the training split, one-step-ahead MAE):
+# 168 h -> 78.4, 336 h -> 77.8, 720 h -> 80.6, 1440 h -> 77.8. The differences are small, so
+# 336 hours (two weeks hourly) is kept as the shortest window that ties the best score.
 SARIMAX_TRAIN_WINDOW_HOURS = 336
 
 
@@ -140,6 +150,10 @@ class SARIMAXForecaster(BaseForecaster):
     Classical statistical baseline: statsmodels SARIMAX with daily seasonality (s=24)
     and air_temperature as an exogenous regressor. Trained on a documented recent window
     of the training split (SARIMAX_TRAIN_WINDOW_HOURS) because a full-data fit is slow.
+
+    Predictions are one step ahead: the fitted parameters stay fixed and the filter is
+    rolled through the test span, so the forecast for hour t uses readings up to t-1.
+    That is the same information XGBoostForecaster gets through its lag_1h feature.
     """
 
     name: str = "sarimax"
@@ -158,17 +172,29 @@ class SARIMAXForecaster(BaseForecaster):
             order=SARIMAX_ORDER,
             seasonal_order=SARIMAX_SEASONAL_ORDER,
         )
-        # Convergence warnings are non-fatal (I/O matrix): suppress them, still produce a fit.
+        # Convergence warnings are non-fatal (I/O matrix): the fit still yields a scored row,
+        # but a non-converged fit is logged so the row is not mistaken for a clean one.
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+            warnings.simplefilter("ignore", category=ConvergenceWarning)
+            # statsmodels also announces when it falls back to zero start parameters; that is
+            # its normal recovery path, not a problem with the fit. Other warnings stay visible.
+            warnings.filterwarnings("ignore", message=r"Non-(stationary|invertible) starting")
             self._results = model.fit(disp=False)
+
+        if not self._results.mle_retvals.get("converged", True):
+            logger.warning(
+                "SARIMAX fit on the last %d training rows did not converge; its row is still scored.",
+                len(fit_df),
+            )
 
         self.train_window_used = len(fit_df)
         return self
 
     def predict(self, test_df: pd.DataFrame) -> np.ndarray:
-        forecast = self._results.get_forecast(
-            steps=len(test_df),
+        # extend() continues the filter from the end of the fitted window with fixed parameters;
+        # its fitted values are the one-step-ahead predictions for each test row.
+        rolled = self._results.extend(
+            endog=test_df["meter_reading"].to_numpy(dtype=float),
             exog=test_df[["air_temperature"]].to_numpy(dtype=float),
         )
-        return np.asarray(forecast.predicted_mean, dtype=float)
+        return np.asarray(rolled.fittedvalues, dtype=float)
