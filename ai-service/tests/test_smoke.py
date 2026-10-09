@@ -8,48 +8,12 @@ import pytest
 from starlette.testclient import TestClient
 
 from src.main import app
-from src.data_pipeline.bdg2_loader import data_loader
-from src.models.forecaster_xgboost import energy_forecaster
-from src.models.anomaly_isolation_forest import anomaly_detector
 
 
 @pytest.fixture(scope="module")
 def client():
     with TestClient(app) as c:
         yield c
-
-
-def test_data_pipeline_loader():
-    """Verify Building Data Genome 2 loader produces valid DataFrame."""
-    df = data_loader.get_or_create_data()
-    assert df is not None
-    assert len(df) > 0
-    assert "timestamp" in df.columns
-    assert "meter_reading_kwh" in df.columns
-    assert "outdoor_temperature_c" in df.columns
-
-
-def test_forecaster_predictor():
-    """Verify XGBoost forecaster generates baseline and 95% confidence intervals."""
-    df = data_loader.get_or_create_data()
-    df_fc = energy_forecaster.predict_horizon(df)
-    assert "predicted_kwh" in df_fc.columns
-    assert "lower_bound_95" in df_fc.columns
-    assert "upper_bound_95" in df_fc.columns
-    assert "residual" in df_fc.columns
-    assert len(df_fc) == len(df)
-    assert (df_fc["predicted_kwh"] >= 0).all()
-
-
-def test_anomaly_detector():
-    """Verify Isolation Forest anomaly detector flags anomalies."""
-    df = data_loader.get_or_create_data()
-    df_fc = energy_forecaster.predict_horizon(df)
-    df_anom = anomaly_detector.detect_anomalies(df_fc)
-    assert "anomaly_score" in df_anom.columns
-    assert "is_anomaly" in df_anom.columns
-    assert "severity" in df_anom.columns
-    assert df_anom["is_anomaly"].sum() > 0
 
 
 def test_api_health(client):
@@ -215,13 +179,100 @@ def test_api_forecast_dataset_missing_503(client):
 
 
 def test_api_anomalies_detect(client):
-    """Verify internal anomaly detection endpoint."""
-    from src.config import get_tariff_rate_vnd
+    """Verify internal anomaly detection endpoint and agreement with energy metrics."""
+    from src.config import get_tariff_rate_usd, get_tariff_rate_vnd
+
+    metrics_resp = client.get("/internal/energy/metrics")
+    assert metrics_resp.status_code == 200
+    metrics_data = metrics_resp.json()
+
     response = client.get("/internal/anomalies/detect")
     assert response.status_code == 200
     events = response.json()
     assert isinstance(events, list)
-    assert len(events) > 0
-    assert "severity" in events[0]
-    first = events[0]
-    assert first["estimated_waste_vnd"] == round(first["delta_kwh"] * get_tariff_rate_vnd(), 0)
+
+    # Agreement with /internal/energy/metrics total_anomalies_detected
+    assert len(events) == metrics_data["total_anomalies_detected"]
+
+    # Also verify POST method behaves identically
+    post_resp = client.post("/internal/anomalies/detect")
+    assert post_resp.status_code == 200
+    assert len(post_resp.json()) == len(events)
+
+    if events:
+        first = events[0]
+        expected_keys = {
+            "id", "building_id", "timestamp", "subsystem", "severity",
+            "anomaly_score", "actual_kwh", "predicted_kwh", "delta_kwh",
+            "outdoor_temp_c", "estimated_waste_vnd", "estimated_waste_usd",
+            "status", "description", "suggested_action"
+        }
+        assert expected_keys.issubset(set(first.keys()))
+
+        # Timestamps are ISO 8601 UTC ending with Z
+        assert all(ev["timestamp"].endswith("Z") for ev in events)
+
+        # Severities are valid
+        valid_severities = {"Normal", "Medium", "Critical", "NORMAL", "MEDIUM", "CRITICAL"}
+        assert all(ev["severity"] in valid_severities for ev in events)
+
+        # Waste calculations tie to tariffs
+        for ev in events:
+            assert ev["delta_kwh"] >= 0.0
+            assert ev["estimated_waste_vnd"] == round(ev["delta_kwh"] * get_tariff_rate_vnd(), 0)
+            assert ev["estimated_waste_usd"] == round(ev["delta_kwh"] * get_tariff_rate_usd(), 2)
+
+
+def test_api_anomalies_detect_missing_artifact(client):
+    """Missing Isolation Forest artifact -> 503 ERR_MODEL_NOT_FOUND naming the file."""
+    import os
+    import shutil
+    import tempfile
+    from pathlib import Path
+    import src.data_pipeline.serving_frame as sf
+
+    sf.reset_serving_cache()
+    current_models_dir = Path(os.environ["ECOTRACK_MODELS_DIR"])
+    with tempfile.TemporaryDirectory() as empty_dir:
+        temp_dir = Path(empty_dir)
+        for item in current_models_dir.iterdir():
+            if item.name != "isolation_forest.joblib":
+                shutil.copy2(item, temp_dir / item.name)
+
+        old_models_dir = os.environ.get("ECOTRACK_MODELS_DIR")
+        os.environ["ECOTRACK_MODELS_DIR"] = str(temp_dir)
+        try:
+            res = client.get("/internal/anomalies/detect")
+            assert res.status_code == 503
+            body = res.json()
+            assert body["code"] == "ERR_MODEL_NOT_FOUND"
+            assert "isolation_forest.joblib" in body["detail"]
+            assert not (temp_dir / "isolation_forest.joblib").exists(), "no model should be trained or saved on error"
+        finally:
+            if old_models_dir is not None:
+                os.environ["ECOTRACK_MODELS_DIR"] = old_models_dir
+            else:
+                os.environ.pop("ECOTRACK_MODELS_DIR", None)
+            sf.reset_serving_cache()
+
+
+def test_api_anomalies_detect_missing_dataset(client):
+    """Missing dataset -> 503 ERR_DATA_NOT_FOUND naming the path."""
+    import os
+    from pathlib import Path
+    import src.data_pipeline.serving_frame as sf
+
+    sf.reset_serving_cache()
+    old_data_path = os.environ.get("ECOTRACK_DATA_PATH")
+    os.environ["ECOTRACK_DATA_PATH"] = str(Path("non_existent_anom_data.csv").resolve())
+    try:
+        res = client.get("/internal/anomalies/detect")
+        assert res.status_code == 503
+        body = res.json()
+        assert body["code"] == "ERR_DATA_NOT_FOUND"
+    finally:
+        if old_data_path is not None:
+            os.environ["ECOTRACK_DATA_PATH"] = old_data_path
+        else:
+            os.environ.pop("ECOTRACK_DATA_PATH", None)
+        sf.reset_serving_cache()

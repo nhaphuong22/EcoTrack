@@ -212,3 +212,17 @@ def test_stream_worker_listener_anomaly_integration(custom_worker, custom_anomal
 
     assert len(received_readings) == 3
     worker.unregister_listener(anomaly_listener)
+
+
+def test_anomaly_service_missing_artifact_raises():
+    """Missing isolation_forest.joblib -> raises ModelArtifactError naming the file, saves nothing."""
+    import tempfile
+    from src.data_pipeline.serving_frame import ModelArtifactError
+
+    with tempfile.TemporaryDirectory() as empty_dir:
+        missing_path = Path(empty_dir) / "isolation_forest.joblib"
+        with pytest.raises(ModelArtifactError) as exc_info:
+            AnomalyDetectionService(model_path=missing_path)
+        assert "isolation_forest.joblib" in str(exc_info.value)
+        assert not missing_path.exists()
+        assert len(list(Path(empty_dir).iterdir())) == 0

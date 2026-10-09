@@ -15,7 +15,9 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from src.config import get_models_dir
 from src.data_pipeline.inference_pipeline import EnergyInferencePipeline
+from src.data_pipeline.serving_frame import ModelArtifactError
 from src.data_pipeline.stream_worker import meter_reading_repository
 
 logger = logging.getLogger("AnomalyService")
@@ -75,9 +77,9 @@ class AnomalyDetectionService:
         event_repository: Optional[AnomalyEventRepository] = None,
         score_threshold: float = -0.035,
     ):
-        backend_dir = Path(__file__).resolve().parents[2]
-        self.model_path = model_path or (backend_dir / "models_saved" / "isolation_forest.joblib")
-        self.pipeline = pipeline or EnergyInferencePipeline()
+        models_dir = get_models_dir()
+        self.model_path = Path(model_path) if model_path else (models_dir / "isolation_forest.joblib")
+        self.pipeline = pipeline or EnergyInferencePipeline(models_dir=models_dir)
         self.event_repository = event_repository or anomaly_event_repository
         self.score_threshold = score_threshold
 
@@ -87,37 +89,22 @@ class AnomalyDetectionService:
         self._load_model()
         self._initialize_baseline_history()
 
-    def _init_fallback_model(self) -> None:
-        """Trains and persists a lightweight Isolation Forest model if missing in CI."""
-        from sklearn.ensemble import IsolationForest
-        np.random.seed(42)
-        X_mock = pd.DataFrame(
-            np.random.uniform(50, 800, size=(100, len(self.pipeline.iso_features))),
-            columns=self.pipeline.iso_features,
-        )
-        self.iso_model = IsolationForest(
-            n_estimators=100, contamination=0.03, random_state=42
-        )
-        self.iso_model.fit(X_mock)
-        try:
-            self.model_path.parent.mkdir(parents=True, exist_ok=True)
-            joblib.dump(self.iso_model, self.model_path)
-        except Exception:
-            pass
-
     def _load_model(self) -> None:
-        """Loads trained Isolation Forest estimator from disk, or initializes fallback."""
+        """Loads trained Isolation Forest estimator from disk, raising ModelArtifactError if missing."""
         if not self.model_path.exists():
-            logger.info("Isolation Forest not found at %s. Creating fallback model...", self.model_path)
-            self._init_fallback_model()
-            return
+            raise ModelArtifactError(
+                f"Model artifact not found: {self.model_path.name}",
+                file_path=str(self.model_path),
+            )
 
         try:
             logger.info("Loading Isolation Forest model from %s...", self.model_path)
             self.iso_model = joblib.load(self.model_path)
         except Exception as e:
-            logger.warning("Failed to load model from %s (%s). Using fallback.", self.model_path, e)
-            self._init_fallback_model()
+            raise ModelArtifactError(
+                f"Failed to load model artifact {self.model_path.name}: {e}",
+                file_path=str(self.model_path),
+            )
 
 
     def _initialize_baseline_history(self) -> None:

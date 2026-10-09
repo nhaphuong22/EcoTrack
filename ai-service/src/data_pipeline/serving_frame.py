@@ -2,7 +2,7 @@ import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import joblib
 import numpy as np
@@ -205,6 +205,44 @@ def compute_energy_metrics(frame: pd.DataFrame) -> Dict[str, Any]:
         "estimated_waste_cost_vnd": round(waste_vnd, 0),
         "estimated_waste_cost_usd": round(waste_usd, 2),
     }
+
+
+def get_anomaly_events(frame: Optional[pd.DataFrame] = None) -> List[Dict[str, Any]]:
+    """
+    Extracts anomalous rows from the serving frame and maps each to an anomaly event dict.
+    Returns events in reverse-chronological order (newest first).
+    """
+    if frame is None:
+        frame = get_serving_frame()
+
+    anom_rows = frame[frame["is_anomaly"]]
+    tariff_vnd = get_tariff_rate_vnd()
+    tariff_usd = get_tariff_rate_usd()
+
+    events: List[Dict[str, Any]] = []
+    for idx, row in anom_rows.iterrows():
+        delta = max(0.0, float(row["meter_reading_kwh"]) - float(row["predicted_kwh"]))
+        cost_vnd = delta * tariff_vnd
+        cost_usd = delta * tariff_usd
+        events.append({
+            "id": f"ANOM-{idx}",
+            "building_id": "office_tower_01",
+            "timestamp": str(row["timestamp"]),
+            "subsystem": "Chiller & HVAC Plant",
+            "severity": str(row["severity"]),
+            "anomaly_score": float(row["anomaly_score"]),
+            "actual_kwh": float(row["meter_reading_kwh"]),
+            "predicted_kwh": float(row["predicted_kwh"]),
+            "delta_kwh": delta,
+            "outdoor_temp_c": float(row["outdoor_temperature_c"]),
+            "estimated_waste_vnd": round(cost_vnd, 0),
+            "estimated_waste_usd": round(cost_usd, 2),
+            "status": "OPEN",
+            "description": "Abnormal load deviation exceeding baseline prediction",
+            "suggested_action": "Inspect chiller plant schedule and sub-meter power draw.",
+            "reason": "Abnormal load deviation exceeding baseline prediction",
+        })
+    return events[::-1]
 
 
 def predict_next_24h(now: Optional[datetime] = None) -> pd.DataFrame:
