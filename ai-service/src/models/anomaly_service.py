@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional
 import uuid
 
 import joblib
-import numpy as np
 import pandas as pd
 
 from src.config import get_models_dir
@@ -272,7 +271,3 @@ class AnomalyDetectionService:
     def clear_events(self) -> None:
         """Clears all stored events."""
         self.event_repository.clear()
-
-
-# Global singleton instance
-anomaly_service = AnomalyDetectionService()
