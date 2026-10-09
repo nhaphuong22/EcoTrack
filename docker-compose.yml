@@ -32,14 +32,14 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - TARIFF_RATE_VND=${TARIFF_RATE_VND:-3100}
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-change-me-internal-token}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:?INTERNAL_API_KEY is required}
     volumes:
       - ./ai-service:/app
       - /app/__pycache__
     depends_on:
       db:
         condition: service_healthy
-    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+    command: python -m src.main
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -59,7 +59,7 @@ services:
       - PORT=5000
       - DATABASE_URL=postgresql://${POSTGRES_USER:-ecotrack}:${POSTGRES_PASSWORD:-ecotrack_secret}@db:5432/${POSTGRES_DB:-ecotrack}?schema=public
       - AI_SERVICE_URL=http://ai-service:8000
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-change-me-internal-token}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:?INTERNAL_API_KEY is required}
     volumes:
       - ./backend:/app
       - /app/node_modules

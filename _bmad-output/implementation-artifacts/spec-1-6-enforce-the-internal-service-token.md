@@ -114,3 +114,29 @@ context:
 ### Review Findings
 
 3-layer review completed at Ponytail full / standard library level. 0 intent gaps, 0 bugs, 0 patches needed. All 4 verification commands tested and verified green. All acceptance criteria satisfied.
+
+### Code Review Findings — 2026-10-09
+
+Adversarial 4-layer review (blind-hunter, edge-case-hunter, verification-gap, acceptance-auditor) of the Story 1.6 commit `82f7f09` (diff baseline `e98e934`, excluding the already-reviewed Story 1.5 patches). Result: **1 decision-needed, 3 patch, 2 defer, 4 rejected.** This supersedes the build-loop self-review above, which checked only that the literal `ecotrack_internal_secret_2026` was gone and missed that its replacement is still a working default and that the fail-fast never runs under the real launch command.
+
+**Decision-needed:**
+
+- [x] [Review][Decision] AI-service fail-fast never runs under the real launch command — The `INTERNAL_API_KEY` guard is in `ai-service/src/main.py`'s `if __name__ == "__main__"` block, but `ai-service/Dockerfile:20` and `docker-compose.yml:42` both launch via `uvicorn src.main:app`, which imports `app` and never executes `__main__`. So when the AI service starts with no key it does **not** fail fast — it boots and 401s every `/internal/*` request, contradicting the AC "fails at startup outside the test environment." The frozen Boundaries name the start path as "uvicorn `__main__`", which the deployment did not actually use. Two fixes considered: **(A)** change the launch to `python -m src.main` in `Dockerfile` + `docker-compose.yml` (runs `__main__` → `uvicorn.run`, behavior-preserving, honors the frozen boundary); **(B)** move the guard to a FastAPI startup/lifespan event in `main.py`. **→ Resolved: Fix A applied** — `Dockerfile:20` and `docker-compose.yml:42` now launch `python -m src.main`; verified the `__main__` guard fires (empty `INTERNAL_API_KEY` → clear error + exit 1).
+
+**Patch:**
+
+- [x] [Review][Patch] docker-compose ships a usable default secret [docker-compose.yml:35] — fixed: both services now use `${INTERNAL_API_KEY:?INTERNAL_API_KEY is required}` (no working default).
+- [x] [Review][Patch] Non-ASCII `X-Internal-Token` raises `TypeError` → 500 instead of 401 [ai-service/src/main.py:47] — fixed: `hmac.compare_digest(provided_key.encode("utf-8"), expected_key.encode("utf-8"))` keeps all wrong tokens on the 401 path.
+- [x] [Review][Patch] Gateway proxy test only asserts the token is a string, not its value [backend/tests/proxy.test.js:41] — fixed: assertion tightened to `process.env.INTERNAL_API_KEY`.
+
+**Deferred:**
+
+- [x] [Review][Defer] Startup fail-fast untested for both services [backend/src/server.js:3 / ai-service/src/main.py:99] — deferred: needs a spawned-subprocess test harness, out of proportion for this story; the spec Verification commands cover it manually.
+- [x] [Review][Defer] Sibling default secret `INGEST_API_KEY=ecotrack_ingest_secret_2026` still ships [backend/.env.example:5] — deferred: pre-existing, out of scope for Story 1.6 (different secret owned by the ingest story).
+
+**Rejected:**
+
+- [Review][Rejected] Spec self-review contradicts shipped code (meta) — the fix would edit the spec under review; the mismatch is instead captured by the decision-needed and patch items above.
+- [Review][Rejected] `aiClient.js` falls back to an empty token `|| ''` (low) — the real gateway start path is guarded by the `server.js` fail-fast, so a properly started gateway never has an unset key; the empty-token path is unreachable in everyday use and the fix adds a throw/branch.
+- [Review][Rejected] Duplicated `"test-internal-token"` literal across `conftest.py` / `test_serving_frame.py` / `test_smoke.py` (low) — a mismatch fails the suites immediately and loudly; centralizing adds indirection for negligible benefit.
+- [Review][Rejected] `OPTIONS` preflight to `/internal/*` returns 401 (low) — `/internal/*` is service-to-service (the gateway uses server-side `fetch`, no browser preflight); the fix adds an `OPTIONS` special-case or middleware reorder for a path no browser reaches.

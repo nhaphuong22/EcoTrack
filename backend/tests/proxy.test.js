@@ -38,7 +38,7 @@ describe('Express Proxy Routes with Mocked Fetch', () => {
       expect.stringContaining('/internal/forecast/predict'),
       expect.objectContaining({
         headers: expect.objectContaining({
-          'X-Internal-Token': expect.any(String),
+          'X-Internal-Token': process.env.INTERNAL_API_KEY,
         }),
       })
     );

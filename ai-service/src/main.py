@@ -44,7 +44,9 @@ async def enforce_internal_token(request: Request, call_next):
     if request.url.path == "/internal" or request.url.path.startswith("/internal/"):
         expected_key = get_internal_api_key()
         provided_key = request.headers.get("X-Internal-Token")
-        if not expected_key or not provided_key or not hmac.compare_digest(provided_key, expected_key):
+        if not expected_key or not provided_key or not hmac.compare_digest(
+            provided_key.encode("utf-8"), expected_key.encode("utf-8")
+        ):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Unauthorized: Invalid or missing internal service token", "code": "ERR_UNAUTHORIZED"},
