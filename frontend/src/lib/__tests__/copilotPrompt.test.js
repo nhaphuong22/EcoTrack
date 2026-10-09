@@ -28,5 +28,14 @@ describe('buildAnomalyPrompt', () => {
     const nullPrompt = buildAnomalyPrompt(null);
     expect(nullPrompt).not.toContain('undefined');
     expect(nullPrompt).not.toContain('NaN');
+
+    const nanPrompt = buildAnomalyPrompt({ delta_kwh: NaN, anomaly_score: NaN });
+    expect(nanPrompt).not.toContain('NaN');
+    expect(nanPrompt).toContain('+0 kWh');
+    expect(nanPrompt).toContain('N/A');
+
+    const negativeDeltaPrompt = buildAnomalyPrompt({ delta_kwh: -18.5 });
+    expect(negativeDeltaPrompt).toContain('-18.5 kWh');
+    expect(negativeDeltaPrompt).not.toContain('+-');
   });
 });

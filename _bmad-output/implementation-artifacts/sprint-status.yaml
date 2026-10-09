@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-08-2026 21:56
-last_updated: 10-09-2026 22:52
+last_updated: 10-09-2026 23:11
 project: EcoTrack
 project_key: NOKEY
 tracking_system: file-system
@@ -42,7 +42,7 @@ development_status:
   1-4-forecast-the-next-24-hours: done
   1-5-detect-anomalies-on-the-unified-pipeline-and-fail-loudly: done
   1-6-enforce-the-internal-service-token: done
-  1-7-open-the-copilot-with-the-anomaly-s-context: review
+  1-7-open-the-copilot-with-the-anomaly-s-context: done
   epic-1-retrospective: optional
 
   epic-2: backlog

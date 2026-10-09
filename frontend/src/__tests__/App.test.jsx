@@ -59,6 +59,11 @@ describe('App - Story 1.7 Copilot & Anomaly Context Integration', () => {
       expect(document.getElementById('ask-copilot-ANOM-101')).toBeInTheDocument();
     });
 
+    // Drawer is closed initially
+    expect(document.querySelector('.bg-black\\/40')).not.toBeInTheDocument();
+    expect(document.querySelector('aside')).toHaveClass('translate-x-full');
+    expect(document.querySelector('aside')).not.toHaveClass('translate-x-0');
+
     const askBtn = document.getElementById('ask-copilot-ANOM-101');
     fireEvent.click(askBtn);
 
@@ -74,8 +79,10 @@ describe('App - Story 1.7 Copilot & Anomaly Context Integration', () => {
     expect(sentPrompt).toContain('0.92');
     expect(buildingId).toBe('office_tower_01');
 
-    // Drawer is opened and displays the prompt
-    expect(document.getElementById('copilot-input')).toBeInTheDocument();
+    // Drawer is opened (open-state-gated backdrop rendered and aside translated into view)
+    expect(document.querySelector('.bg-black\\/40')).toBeInTheDocument();
+    expect(document.querySelector('aside')).toHaveClass('translate-x-0');
+    expect(document.querySelector('aside')).not.toHaveClass('translate-x-full');
     expect(screen.getByText(new RegExp('Phân tích sự cố ANOM-101', 'i'))).toBeInTheDocument();
   });
 
@@ -158,11 +165,18 @@ describe('App - Story 1.7 Copilot & Anomaly Context Integration', () => {
       expect(document.getElementById('floating-copilot-btn')).toBeInTheDocument();
     });
 
+    // Drawer is closed initially
+    expect(document.querySelector('.bg-black\\/40')).not.toBeInTheDocument();
+    expect(document.querySelector('aside')).toHaveClass('translate-x-full');
+    expect(document.querySelector('aside')).not.toHaveClass('translate-x-0');
+
     const floatingBtn = document.getElementById('floating-copilot-btn');
     fireEvent.click(floatingBtn);
 
-    // Drawer opens
-    expect(document.getElementById('copilot-input')).toBeInTheDocument();
+    // Drawer opens (backdrop rendered, translate-x-0 applied)
+    expect(document.querySelector('.bg-black\\/40')).toBeInTheDocument();
+    expect(document.querySelector('aside')).toHaveClass('translate-x-0');
+    expect(document.querySelector('aside')).not.toHaveClass('translate-x-full');
     // No message was sent
     expect(api.sendCopilotMessage).not.toHaveBeenCalled();
     // Welcome message is visible

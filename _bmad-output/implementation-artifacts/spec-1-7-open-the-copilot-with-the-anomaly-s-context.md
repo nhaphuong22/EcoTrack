@@ -79,7 +79,7 @@ context:
 
 ## Implementation Notes
 
-- The Story 1.6 code-review patches (`Dockerfile`, `docker-compose.yml`, `ai-service/src/main.py`, `backend/tests/proxy.test.js`) and the review-artifact edits are **uncommitted** in the working tree on `feature/epic-1-foundation`; `baseline_commit` is the Story 1.6 commit `82f7f09`. Commit the working tree before running the build so Story 1.7's diff is clean (the build/review will diff from the real post-commit baseline, as earlier stories did).
+- The Story 1.6 code-review patches (`Dockerfile`, `docker-compose.yml`, `ai-service/src/main.py`, `backend/tests/proxy.test.js`) and review-artifact edits are committed on `feature/epic-1-foundation` in `e088756`; `baseline_commit` is `e088756ac6a59f6133e281984c8a42c26b9b2bb4`.
 - `sendMessage` from `useCopilot` is already memoized with `useCallback([])`, so lifting the hook and passing it down will not churn the drawer on every render.
 
 ## Spec Change Log
@@ -110,3 +110,24 @@ context:
 ### Review Findings
 
 3-layer review completed at Ponytail full / clean code level. 0 intent gaps, 0 bad specs, 0 patches needed. All 3 Acceptance Criteria and all 7 rows of the I/O & Edge-Case Matrix verified green by 9 automated tests. Production build verified clean.
+
+### Code Review Findings — 2026-10-09 (4-layer adversarial: blind-hunter, edge-case-hunter, verification-gap, acceptance-auditor)
+
+Diff reviewed: commit `96391b1` (baseline `e088756`), frontend only, `package-lock.json` excluded.
+
+**Patch (2):**
+- [x] [Review][Patch] AC1 & floating-button tests assert "drawer opens" via always-mounted DOM — the drawer `<aside>` and `#copilot-input` render unconditionally (only `isOpen` toggles a CSS transform + the backdrop); deleting `setDrawerOpen(true)` from `handleAskCopilot` would NOT fail the AC1 test. Assert an open-state-gated element (backdrop `.bg-black/40`, or the aside's `translate-x-0`) present after the click and absent before. [frontend/src/__tests__/App.test.jsx:78, :165]
+- [x] [Review][Patch] `buildAnomalyPrompt` leaks malformed numeric text the frozen I/O matrix forbids — a non-finite `delta_kwh` (NaN passes `!= null`) renders `+NaN kWh`; a non-finite `anomaly_score` (NaN is `typeof 'number'`) renders `NaN` via `.toFixed(2)`; a negative `delta_kwh` renders `+-18 kWh` (also mislabeled "tăng"). Guard with `Number.isFinite` and format the sign so no `NaN`/`+-` leaks. [frontend/src/lib/copilotPrompt.js:5-8]
+
+**Defer (1):**
+- [x] [Review][Defer] No automated test for the last-10-entry history window (carry into a later `sendCopilotMessage`, truncate at 10, empty on clear-history) [frontend/src/__tests__/App.test.jsx] — deferred: pre-existing behavior; `useCopilot.js` is unchanged by this story (only lifted), and the test harness now exists to add it later.
+
+**Rejected (8):**
+- (false) `vite.config.js` importing `defineConfig` from `vitest/config` "couples prod build to vitest": `vite` is itself a `devDependency`, so no `--omit=dev`/production install ever runs `vite build`; requiring `vitest` (also a devDep) at config load adds no failure mode the build didn't already have.
+- (low) `handleAskCopilot` has no in-flight guard (overlapping sends on rapid clicks): the frozen I/O matrix row 2 deliberately wants a second anomaly click to append + send to the same conversation; an in-flight guard adds a branch with ambiguous ignore-vs-queue semantics — more than a direct correction, unlikely in everyday use.
+- (low) `CopilotDrawer` defaults `messages/isLoading/error` but not `sendMessage/clearHistory`: `App` always passes both; standalone/partial render is not a real scenario in the app; defaulting them adds complexity for no reachable harm.
+- (low) Tests query by `getElementById`/`getByText` rather than accessible roles/names: test-internal brittleness, no user-facing harm; the fix (rewrite queries + add accessible names across components) is more than a direct correction.
+- (false) `src/test/setup.js` adds `scrollIntoView` + `ResizeObserver` stubs beyond the Code Map's `import '@testing-library/jest-dom'`: both are necessary (the drawer calls `scrollIntoView`; Recharts needs `ResizeObserver`) and the Code Map is outside the frozen block — a justified, necessary expansion, not a defect.
+- (low) `@testing-library/user-event` added but unused: the spec Code Map explicitly asked for it; it is a devDep (not bundled) with no named harm; removing it would contradict the spec.
+- (reject — fix edits spec/tracking) status contradiction: spec frontmatter `status: 'done'` vs `sprint-status.yaml` `1-7: review` — reconciled by this review's own status sync at close.
+- (reject — fix edits spec) baseline contradiction: frontmatter `baseline_commit: e088756` (correct — the real Story 1.7 baseline) vs the Implementation Notes prose still reading `82f7f09` (stale).

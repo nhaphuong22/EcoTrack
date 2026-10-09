@@ -2,10 +2,12 @@ export function buildAnomalyPrompt(anomaly) {
   const anom = anomaly || {};
   const id = anom.id || 'N/A';
   const time = anom.timestamp ? String(anom.timestamp).slice(0, 16) : 'N/A';
-  const delta = anom.delta_kwh != null ? `+${anom.delta_kwh}` : '+0';
-  const score = typeof anom.anomaly_score === 'number'
+  const delta = Number.isFinite(anom.delta_kwh)
+    ? (anom.delta_kwh >= 0 ? `+${anom.delta_kwh}` : `${anom.delta_kwh}`)
+    : '+0';
+  const score = Number.isFinite(anom.anomaly_score)
     ? anom.anomaly_score.toFixed(2)
-    : (anom.anomaly_score ?? 'N/A');
+    : 'N/A';
 
   return (
     `Phân tích sự cố ${id} xảy ra lúc ${time} — ` +
