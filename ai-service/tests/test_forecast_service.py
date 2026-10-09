@@ -8,6 +8,7 @@ the held-out test-split RMSE, autoregressive chaining, and the error paths
 import json
 import os
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -50,10 +51,13 @@ def test_returns_24_rows_and_columns():
 
 def test_timestamps_increasing_and_after_last_observed():
     """Every forecast timestamp is strictly increasing, ISO-Z, and later than the last observed reading."""
-    frame = get_serving_frame()
+    # Pin `now` so the anchor read and the forecast cannot straddle a UTC hour
+    # rollover (which would make the strict +1h assertion below off by an hour).
+    fixed_now = datetime.now(timezone.utc)
+    frame = get_serving_frame(fixed_now)
     last_observed = frame["timestamp"].iloc[-1]
 
-    df = predict_next_24h()
+    df = predict_next_24h(fixed_now)
     timestamps = list(df["timestamp"])
 
     assert all(ts.endswith("Z") for ts in timestamps)
@@ -70,10 +74,12 @@ def test_timestamps_increasing_and_after_last_observed():
 
 def test_future_temperatures_match_prior_day_proxy():
     """Daily-seasonal proxy: each point's temperature = serving frame's value at future_ts - 24h."""
-    frame = get_serving_frame()
+    # Pin `now` so the frame snapshot and the forecast share one anchor across an hour rollover.
+    fixed_now = datetime.now(timezone.utc)
+    frame = get_serving_frame(fixed_now)
     temp_by_ts = dict(zip(pd.to_datetime(frame["timestamp"]), frame["outdoor_temperature_c"].astype(float)))
 
-    df = predict_next_24h()
+    df = predict_next_24h(fixed_now)
     assert np.isfinite(df["outdoor_temperature_c"].to_numpy(dtype=float)).all()
 
     for _, row in df.iterrows():

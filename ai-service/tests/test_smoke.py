@@ -2,6 +2,8 @@
 EcoTrack AI Service - Smoke & Integration Tests
 Validates ETL pipeline, ML forecaster, anomaly detector, and internal FastAPI AI endpoints.
 """
+import math
+
 import pytest
 from starlette.testclient import TestClient
 
@@ -86,6 +88,12 @@ def test_api_energy_timeseries(client):
 
 def test_api_forecast_predict(client):
     """Verify internal 24h forecast endpoint: 24 forward points, ordered and bounded."""
+    # Capture the last observed timestamp BEFORE the request so a UTC hour rollover
+    # between the two cannot make forecast[0] equal a newer anchor (every forecast
+    # timestamp stays strictly later than an anchor read no later than the request).
+    from src.data_pipeline.serving_frame import get_serving_frame
+    last_observed = get_serving_frame()["timestamp"].iloc[-1]
+
     response = client.get("/internal/forecast/predict")
     assert response.status_code == 200
     data = response.json()
@@ -93,10 +101,6 @@ def test_api_forecast_predict(client):
     assert data["horizon_hours"] == 24
     forecast = data["forecast"]
     assert len(forecast) == 24
-
-    # Last observed timestamp from the serving frame (what the timeseries endpoint serves).
-    from src.data_pipeline.serving_frame import get_serving_frame
-    last_observed = get_serving_frame()["timestamp"].iloc[-1]
 
     timestamps = [pt["timestamp"] for pt in forecast]
     # ISO 8601 UTC with Z suffix
@@ -107,11 +111,13 @@ def test_api_forecast_predict(client):
     # Every forecast timestamp is strictly later than the last observed reading
     assert all(ts > last_observed for ts in timestamps)
 
-    # lower <= predicted <= upper and lower floored at 0
+    # lower <= predicted <= upper and lower floored at 0; every point carries a finite temperature
     for pt in forecast:
         assert pt["lower_bound_95"] <= pt["predicted_kwh"] + 1e-6
         assert pt["predicted_kwh"] <= pt["upper_bound_95"] + 1e-6
         assert pt["lower_bound_95"] >= 0.0
+        assert "outdoor_temperature_c" in pt
+        assert isinstance(pt["outdoor_temperature_c"], (int, float)) and math.isfinite(pt["outdoor_temperature_c"])
 
 
 def test_api_forecast_predict_warm_p95(client):

@@ -164,3 +164,27 @@ context:
 - `low` — Cache race on the model read under a concurrent `reset_serving_cache()` (blind-hunter, edge-case-hunter): rare admin cache-clear mid-request, transient 503 cleared by retry; fix restructures locking beyond a direct correction.
 - `low` — Reparse of 720 timestamps per call, brittle data-dependent bounds assertion, non-`monkeypatch` test globals, duplicated `horizon_hours`/`building_id`, redundant `str()` cast: cosmetic or pre-existing, p95 budget still met.
 - `false` — Spec/sprint-status state disagreement and stale spec sections: transient workflow state; filled by the review/present steps.
+
+### Code Review Findings — 2026-10-09 (human review gate)
+
+4-layer code review (blind-hunter, edge-case-hunter, verification-gap, acceptance-auditor) at Opus capability, 2026-10-09, over `03da475..HEAD`. 0 decision-needed, 2 patch, 1 defer, 8 rejected. The Acceptance Auditor found no acceptance-criteria violations. This is the human-gate review (`bmad-code-review`), separate from the build-loop triage in `## Review Triage Log`.
+
+**Patch:**
+
+- [x] [Review][Patch] Endpoint response field `outdoor_temperature_c` unpinned at the API boundary [`ai-service/tests/test_smoke.py`:111] — `test_api_forecast_predict`'s per-point loop asserts `timestamp`/`lower_bound_95`/`predicted_kwh`/`upper_bound_95` but never `outdoor_temperature_c`; the unit test checks only the DataFrame column, so dropping or renaming the field in `_get_forecast` ships green. Fixed: the smoke loop now asserts each forecast point carries a finite `outdoor_temperature_c`.
+- [x] [Review][Patch] Hour-rollover flakiness — tests read the anchor separately from the forecast call [`ai-service/tests/test_forecast_service.py`:68, `ai-service/tests/test_smoke.py`:108] — `last_observed` was read via a `get_serving_frame()` call distinct from `predict_next_24h()` / the HTTP request; a UTC hour tick between the two diverged the anchors and false-failed the strict assertions. Fixed: `test_timestamps_increasing_and_after_last_observed` and `test_future_temperatures_match_prior_day_proxy` now pin a single `fixed_now` across both calls, and `test_api_forecast_predict` captures `last_observed` before issuing the request.
+
+**Defer:**
+
+- [x] [Review][Defer] Malformed / partial `model_metadata.json` raises an unhandled `KeyError` (bare 500, no error envelope) [`ai-service/src/data_pipeline/serving_frame.py`:91] — deferred: pre-existing Story 1.1 behavior in `_load_artifacts_and_base_frame` (`metadata["xgboost_metrics"]["rmse_kwh"]`), which runs inside `get_serving_frame` *before* `predict_next_24h`'s own read; not introduced by this change. The I/O matrix covers a wholly-absent artifact but not a present-but-incomplete metadata file.
+
+**Rejected:**
+
+- `low` — Temperature-proxy `else` fallback substitutes a positional (wrong-hour) value on a non-contiguous frame (blind-hunter + edge-case-hunter + acceptance-auditor): unreachable on the contiguous hourly serving frame (the proxy test asserts the `if` branch for all 24 points); the proposed fix adds a new `raise`/branch guarding a state never shown reachable.
+- `false` — Spec `status: done` contradicts `sprint-status.yaml: review` (blind-hunter + acceptance-auditor): the two track different axes — `status: done` is the build's route/terminal state (implementation + build-loop review complete), `review` is the human lifecycle gate (this code review). `done`/`review` is the expected pairing entering the gate, and the only fix would edit the spec under review.
+- `low` — Cache race: a concurrent `reset_serving_cache()` between `get_serving_frame()` returning and the locked model read yields a spurious 503 (blind-hunter + edge-case-hunter): `reset_serving_cache` has no production caller (tests only), so the window is unreachable in production; the fix changes `get_serving_frame`'s return contract (public surface).
+- `low` — Tests mutate module globals / `os.environ` instead of `monkeypatch`; "not xdist-safe" (blind-hunter): each test restores state in `try/finally` and pytest-xdist isolates workers in separate processes, so globals/env are not shared; the fix is a multi-test refactor.
+- `low` — No Pydantic `response_model` enforces the five-field shape (blind-hunter): pre-existing hand-rolled-dict pattern from Stories 1.1–1.2, not introduced here; adding response models is an enhancement that adds public surface.
+- `low` — Reported `outdoor_temperature_c` differs from the model-consumed value (blind-hunter): `prepare_forecast_features` rounds `air_temperature` to 2 dp while the response reports the unrounded proxy; divergence ≤ 0.005 °C beyond two decimals, and the reported value is the genuine proxy input — cosmetic.
+- `low` — Forecast path also hard-requires `isolation_forest.joblib` (acceptance-auditor): pre-existing shared-loader behavior; a missing ISO artifact still yields a correct 503 (naming the ISO file); the fix would split the shared loader.
+- `low` — Redundant `str(row['timestamp'])` cast in `_get_forecast` (acceptance-auditor): pre-existing no-op; `predict_next_24h` already returns ISO-Z strings — cosmetic.
