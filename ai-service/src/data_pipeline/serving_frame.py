@@ -2,13 +2,14 @@ import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import joblib
 import numpy as np
 import pandas as pd
 
 from src.config import get_data_path, get_models_dir, get_tariff_rate_usd, get_tariff_rate_vnd
+from src.data_pipeline.inference_pipeline import EnergyInferencePipeline
 from src.models.train_models import engineer_features, load_dataset
 
 
@@ -26,24 +27,38 @@ class ModelArtifactError(Exception):
         self.file_path = file_path
 
 
+class InsufficientHistoryError(Exception):
+    """Raised when there are fewer than 24 hourly observations to forecast from."""
+    def __init__(self, message: str, available: int = 0, required: int = 24):
+        super().__init__(message)
+        self.available = available
+        self.required = required
+
+
 _lock = threading.Lock()
 _cached_base_df: Optional[pd.DataFrame] = None
 _cached_meta: Optional[Dict[str, Any]] = None
 _cached_hour_key: Optional[datetime] = None
 _cached_serving_frame: Optional[pd.DataFrame] = None
+_cached_xgb_model: Optional[Any] = None
+_cached_pipeline: Optional["EnergyInferencePipeline"] = None
+
+FORECAST_HORIZON_HOURS = 24
 
 
 def reset_serving_cache() -> None:
     """Clears all in-memory cached frames and model artifacts."""
-    global _cached_base_df, _cached_meta, _cached_hour_key, _cached_serving_frame
+    global _cached_base_df, _cached_meta, _cached_hour_key, _cached_serving_frame, _cached_xgb_model, _cached_pipeline
     with _lock:
         _cached_base_df = None
         _cached_meta = None
         _cached_hour_key = None
         _cached_serving_frame = None
+        _cached_xgb_model = None
+        _cached_pipeline = None
 
 
-def _load_artifacts_and_base_frame(data_path: Path, models_dir: Path) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+def _load_artifacts_and_base_frame(data_path: Path, models_dir: Path) -> Tuple[pd.DataFrame, Dict[str, Any], Any]:
     if not data_path.exists():
         raise ServingDataError(f"Processed dataset not found at: {data_path}", path=str(data_path))
 
@@ -106,7 +121,7 @@ def _load_artifacts_and_base_frame(data_path: Path, models_dir: Path) -> Tuple[p
         "severity": severity,
     })
 
-    return base_df, metadata
+    return base_df, metadata, xgb_model
 
 
 def get_serving_frame(now: Optional[datetime] = None) -> pd.DataFrame:
@@ -114,7 +129,7 @@ def get_serving_frame(now: Optional[datetime] = None) -> pd.DataFrame:
     Returns the 720-hour serving window ending at the current UTC hour,
     replayed from the latest matching weekday/hour in the dataset.
     """
-    global _cached_base_df, _cached_meta, _cached_hour_key, _cached_serving_frame
+    global _cached_base_df, _cached_meta, _cached_hour_key, _cached_serving_frame, _cached_xgb_model
 
     if now is None:
         now = datetime.now(timezone.utc)
@@ -129,7 +144,7 @@ def get_serving_frame(now: Optional[datetime] = None) -> pd.DataFrame:
         if _cached_base_df is None:
             data_path = get_data_path()
             models_dir = get_models_dir()
-            _cached_base_df, _cached_meta = _load_artifacts_and_base_frame(data_path, models_dir)
+            _cached_base_df, _cached_meta, _cached_xgb_model = _load_artifacts_and_base_frame(data_path, models_dir)
 
         if _cached_hour_key == now_hour and _cached_serving_frame is not None:
             return _cached_serving_frame
@@ -190,3 +205,145 @@ def compute_energy_metrics(frame: pd.DataFrame) -> Dict[str, Any]:
         "estimated_waste_cost_vnd": round(waste_vnd, 0),
         "estimated_waste_cost_usd": round(waste_usd, 2),
     }
+
+
+def get_anomaly_events(frame: Optional[pd.DataFrame] = None) -> List[Dict[str, Any]]:
+    """
+    Extracts anomalous rows from the serving frame and maps each to an anomaly event dict.
+    Returns events in reverse-chronological order (newest first).
+    """
+    if frame is None:
+        frame = get_serving_frame()
+
+    anom_rows = frame[frame["is_anomaly"]]
+    tariff_vnd = get_tariff_rate_vnd()
+    tariff_usd = get_tariff_rate_usd()
+
+    events: List[Dict[str, Any]] = []
+    for idx, row in anom_rows.iterrows():
+        delta = max(0.0, float(row["meter_reading_kwh"]) - float(row["predicted_kwh"]))
+        cost_vnd = delta * tariff_vnd
+        cost_usd = delta * tariff_usd
+        events.append({
+            "id": f"ANOM-{idx}",
+            "building_id": "office_tower_01",
+            "timestamp": str(row["timestamp"]),
+            "subsystem": "Chiller & HVAC Plant",
+            "severity": str(row["severity"]),
+            "anomaly_score": float(row["anomaly_score"]),
+            "actual_kwh": float(row["meter_reading_kwh"]),
+            "predicted_kwh": float(row["predicted_kwh"]),
+            "delta_kwh": delta,
+            "outdoor_temp_c": float(row["outdoor_temperature_c"]),
+            "estimated_waste_vnd": round(cost_vnd, 0),
+            "estimated_waste_usd": round(cost_usd, 2),
+            "status": "OPEN",
+            "description": "Abnormal load deviation exceeding baseline prediction",
+            "suggested_action": "Inspect chiller plant schedule and sub-meter power draw.",
+            "reason": "Abnormal load deviation exceeding baseline prediction",
+        })
+    return events[::-1]
+
+
+def predict_next_24h(now: Optional[datetime] = None) -> pd.DataFrame:
+    """
+    Produces a genuine 24-hour-ahead recursive forecast anchored on the serving
+    frame's last observed hour (the current UTC hour).
+
+    The forecast covers exactly the 24 hours *after* the last observed reading.
+    Predictions come from the trained XGBoost artifact driven recursively by
+    ``EnergyInferencePipeline.predict_forecast_autoregressive`` (each step's
+    prediction becomes the next step's ``lag_1h``). 95% bounds are
+    ``predicted ± 1.96 × xgboost_metrics.rmse_kwh`` (held-out test-split RMSE),
+    with the lower bound floored at 0.
+
+    Future outdoor temperatures use a documented daily-seasonal proxy: each
+    future hour reuses the serving frame's ``outdoor_temperature_c`` from the
+    same hour on the previous day (``future_ts - 24h``).
+
+    Returns a DataFrame of 24 rows with columns:
+    ``timestamp`` (ISO 8601 UTC with ``Z``), ``predicted_kwh``,
+    ``lower_bound_95``, ``upper_bound_95``, ``outdoor_temperature_c``.
+    """
+    global _cached_pipeline
+
+    # Reuses the Story 1.1 serving cache (base frame + metadata + model loaded once).
+    frame = get_serving_frame(now)
+
+    with _lock:
+        xgb_model = _cached_xgb_model
+        meta = _cached_meta
+
+    if xgb_model is None or meta is None:
+        # Defensive: get_serving_frame populates both on success.
+        raise ModelArtifactError("XGBoost model artifact is not loaded", file_path=str(get_models_dir()))
+
+    available = len(frame)
+    if available < FORECAST_HORIZON_HOURS:
+        raise InsufficientHistoryError(
+            f"Insufficient history to forecast: need at least {FORECAST_HORIZON_HOURS} "
+            f"hourly observations, got {available}.",
+            available=available,
+            required=FORECAST_HORIZON_HOURS,
+        )
+
+    rmse = float(meta["xgboost_metrics"]["rmse_kwh"])
+
+    # Parse the frame's ISO-Z timestamps once (vectorized) to stay off the per-request disk/CPU budget.
+    frame_ts = pd.to_datetime(frame["timestamp"])
+
+    # Anchor on the serving frame's last row = current UTC hour.
+    last_ts = frame_ts.iloc[-1]
+
+    # 24 future hourly timestamps: current_hour + 1 ... current_hour + 24.
+    future_dt = [last_ts + pd.Timedelta(hours=h) for h in range(1, FORECAST_HORIZON_HOURS + 1)]
+
+    # Future temperatures: same hour of the previous day (future_ts - 24h),
+    # looked up from the serving frame. Documented daily-seasonal proxy.
+    temp_by_ts = dict(zip(frame_ts, frame["outdoor_temperature_c"].astype(float)))
+    recent_temps = frame["outdoor_temperature_c"].to_numpy(dtype=float)
+    future_temps: list = []
+    for i, ts in enumerate(future_dt):
+        prior_day_ts = ts - pd.Timedelta(hours=24)
+        if prior_day_ts in temp_by_ts:
+            future_temps.append(float(temp_by_ts[prior_day_ts]))
+        else:
+            # Contiguous hourly frame ending at the anchor: the same-hour-prior-day
+            # value is the i-th row of the trailing 24-hour window.
+            future_temps.append(float(recent_temps[-FORECAST_HORIZON_HOURS + i]))
+
+    # Build the pipeline once and reuse it; its constructor reads model_metadata.json
+    # from disk, so a warm call must not re-instantiate it.
+    with _lock:
+        if _cached_pipeline is None:
+            _cached_pipeline = EnergyInferencePipeline(models_dir=get_models_dir())
+        pipeline = _cached_pipeline
+
+    # The recursive helper only consults the trailing window (last 48 readings); pass a
+    # compact slice with pre-parsed timestamps so the per-request work stays tiny.
+    tail_n = min(len(frame), 48)
+    recent_readings = pd.DataFrame({
+        "timestamp": frame_ts.iloc[-tail_n:].to_numpy(),
+        "meter_reading_kwh": frame["meter_reading_kwh"].iloc[-tail_n:].to_numpy(dtype=float),
+    })
+
+    forecast_df = pipeline.predict_forecast_autoregressive(
+        xgb_model=xgb_model,
+        recent_readings_df=recent_readings,
+        future_timestamps=future_dt,
+        future_temperatures=future_temps,
+    )
+
+    predicted = forecast_df["predicted_meter_reading"].to_numpy(dtype=float)
+    lower_bound = np.maximum(0.0, predicted - 1.96 * rmse)
+    upper_bound = predicted + 1.96 * rmse
+
+    iso_timestamps = [ts.strftime("%Y-%m-%dT%H:%M:%SZ") for ts in future_dt]
+
+    return pd.DataFrame({
+        "timestamp": iso_timestamps,
+        "predicted_kwh": predicted.astype(float),
+        "lower_bound_95": lower_bound.astype(float),
+        "upper_bound_95": upper_bound.astype(float),
+        "outdoor_temperature_c": np.asarray(future_temps, dtype=float),
+    })

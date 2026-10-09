@@ -53,9 +53,11 @@ def setup_test_environment():
 
     old_data_path = os.environ.get("ECOTRACK_DATA_PATH")
     old_models_dir = os.environ.get("ECOTRACK_MODELS_DIR")
+    old_internal_key = os.environ.get("INTERNAL_API_KEY")
 
     os.environ["ECOTRACK_DATA_PATH"] = str(fixture_csv)
     os.environ["ECOTRACK_MODELS_DIR"] = str(temp_models_dir)
+    os.environ["INTERNAL_API_KEY"] = "test-internal-token"
     reset_serving_cache()
 
     yield {
@@ -74,5 +76,10 @@ def setup_test_environment():
         os.environ["ECOTRACK_MODELS_DIR"] = old_models_dir
     else:
         os.environ.pop("ECOTRACK_MODELS_DIR", None)
+
+    if old_internal_key is not None:
+        os.environ["INTERNAL_API_KEY"] = old_internal_key
+    else:
+        os.environ.pop("INTERNAL_API_KEY", None)
 
     shutil.rmtree(temp_dir, ignore_errors=True)

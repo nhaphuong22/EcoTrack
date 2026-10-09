@@ -1,4 +1,10 @@
 require('dotenv').config();
+
+if (!process.env.INTERNAL_API_KEY) {
+  console.error('[EcoTrack Express Backend] ERROR: INTERNAL_API_KEY environment variable is required but not set.');
+  process.exit(1);
+}
+
 const app = require('./app');
 const { seedDefaultBuildingsIfNeeded } = require('./services/buildingService');
 

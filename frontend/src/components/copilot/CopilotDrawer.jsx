@@ -2,10 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { X, Send, Bot, Trash2, Loader2 } from 'lucide-react';
 import ChatMessage from './ChatMessage';
 import QuickPrompts from './QuickPrompts';
-import { useCopilot } from '../../hooks/useCopilot';
-
-export default function CopilotDrawer({ isOpen, onClose }) {
-  const { messages, isLoading, error, sendMessage, clearHistory } = useCopilot();
+export default function CopilotDrawer({
+  isOpen,
+  onClose,
+  messages = [],
+  isLoading = false,
+  error = null,
+  sendMessage,
+  clearHistory,
+}) {
   const [input, setInput] = useState('');
   const bottomRef = useRef(null);
   const inputRef  = useRef(null);
