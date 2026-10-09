@@ -1,11 +1,13 @@
+import hmac
 import os
 import sys
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
+from src.config import get_internal_api_key
 from src.data_pipeline.serving_frame import (
     InsufficientHistoryError,
     ModelArtifactError,
@@ -35,6 +37,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def enforce_internal_token(request: Request, call_next):
+    if request.url.path == "/internal" or request.url.path.startswith("/internal/"):
+        expected_key = get_internal_api_key()
+        provided_key = request.headers.get("X-Internal-Token")
+        if not expected_key or not provided_key or not hmac.compare_digest(provided_key, expected_key):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Unauthorized: Invalid or missing internal service token", "code": "ERR_UNAUTHORIZED"},
+            )
+    return await call_next(request)
 
 # Mount Clean Domain AI Routers
 app.include_router(energy.router)
@@ -81,6 +96,9 @@ def health():
 
 if __name__ == "__main__":
     import uvicorn
+    if not get_internal_api_key():
+        print("ERROR: INTERNAL_API_KEY environment variable is required but not set.", file=sys.stderr)
+        sys.exit(1)
     port = int(os.getenv("PORT", 8000))
     host = os.getenv("HOST", "0.0.0.0")
     print(f"Starting EcoTrack AI Service at http://{host}:{port} ...")

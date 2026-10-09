@@ -12,8 +12,33 @@ from src.main import app
 
 @pytest.fixture(scope="module")
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, headers={"X-Internal-Token": "test-internal-token"}) as c:
         yield c
+
+
+def test_api_internal_token_enforcement():
+    """FR17/NFR1: /internal/* routes require valid X-Internal-Token (401 ERR_UNAUTHORIZED)."""
+    with TestClient(app) as raw_client:
+        # Missing token -> 401
+        res_missing = raw_client.get("/internal/energy/metrics")
+        assert res_missing.status_code == 401
+        body_missing = res_missing.json()
+        assert body_missing["code"] == "ERR_UNAUTHORIZED"
+        assert "token" in body_missing["detail"].lower()
+
+        # Wrong token -> 401
+        res_wrong = raw_client.get("/internal/energy/metrics", headers={"X-Internal-Token": "wrong-secret-token"})
+        assert res_wrong.status_code == 401
+        assert res_wrong.json()["code"] == "ERR_UNAUTHORIZED"
+
+        # Health and root open with no token
+        res_health = raw_client.get("/health")
+        assert res_health.status_code == 200
+        assert res_health.json() == {"status": "healthy"}
+
+        res_root = raw_client.get("/")
+        assert res_root.status_code == 200
+        assert res_root.json()["status"] == "operational"
 
 
 def test_api_health(client):

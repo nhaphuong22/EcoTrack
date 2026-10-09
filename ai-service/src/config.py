@@ -16,3 +16,8 @@ def get_data_path() -> Path:
 def get_models_dir() -> Path:
     val = os.getenv("ECOTRACK_MODELS_DIR")
     return Path(val) if val else get_default_paths()[1]
+
+
+def get_internal_api_key() -> str | None:
+    return os.getenv("INTERNAL_API_KEY")
+

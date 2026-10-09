@@ -34,7 +34,7 @@ REQUIRED_COLUMNS = [
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, headers={"X-Internal-Token": "test-internal-token"}) as c:
         yield c
 
 
