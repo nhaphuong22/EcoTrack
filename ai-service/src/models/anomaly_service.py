@@ -74,7 +74,7 @@ class AnomalyDetectionService:
         model_path: Optional[Path] = None,
         pipeline: Optional[EnergyInferencePipeline] = None,
         event_repository: Optional[AnomalyEventRepository] = None,
-        score_threshold: float = -0.035,
+        score_threshold: float = 0.0,
     ):
         models_dir = get_models_dir()
         self.model_path = Path(model_path) if model_path else (models_dir / "isolation_forest.joblib")
