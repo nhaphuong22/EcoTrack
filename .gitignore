@@ -49,5 +49,5 @@ _bmad-output/test-artifacts/
 _bmad-output/party-mode/
 # 6. Folder tai lieu & Logging
 docs/
-experiments/
-**/experiments/
+experiments/logs/
+**/experiments/logs/
