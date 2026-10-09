@@ -70,6 +70,30 @@ def test_benchmark_happy_path_schema_and_comparison(sample_partitions, tmp_path)
     assert xgb_row["r2"] > naive_row["r2"], "XGBoost R2 must be higher than Seasonal-naive"
 
 
+def test_execute_benchmark_writes_results_csv(tmp_path):
+    """
+    Verify the end-to-end CLI happy path (AC1 one-command deliverable consumed by Story 4.4):
+    - execute_benchmark writes results.csv at the requested output path.
+    - The written file parses back with exactly the 8 standard columns and 2 model rows.
+    """
+    fixture_path = Path(__file__).resolve().parent / "fixtures" / "office_building_sample.csv"
+    output_file = tmp_path / "results.csv"
+
+    results_df = execute_benchmark(data_path=fixture_path, output_path=output_file)
+
+    assert output_file.exists(), "execute_benchmark must write results.csv to the output path"
+
+    written_df = pd.read_csv(output_file)
+    assert list(written_df.columns) == BENCHMARK_COLUMNS
+    assert len(written_df) == 2
+    assert set(written_df["model"]) == {"seasonal_naive", "xgboost"}
+    assert written_df["model_file_size_bytes"].gt(0).all(), "Every serialized size must be > 0"
+
+    # Returned frame matches what was persisted
+    assert list(results_df.columns) == list(written_df.columns)
+    assert len(results_df) == len(written_df)
+
+
 def test_seasonal_naive_predictions_equal_lag_24h(sample_partitions):
     """
     Verify SeasonalNaiveForecaster predictions:

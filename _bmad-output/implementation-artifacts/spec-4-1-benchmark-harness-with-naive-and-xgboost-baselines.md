@@ -87,6 +87,8 @@ context: []
 ## Review Triage Log
 
 - `models.py` / `benchmark.py` / `run_benchmark.py`: All 7 matrix rows verified and tested by `test_benchmark.py`. Zero defects found across blind-hunter, edge-case-hunter, and verification-gap lenses. Verdict: PASS (no deferred items).
+- Post-review patch pass (2026-10-10): both review patches applied — added `test_execute_benchmark_writes_results_csv` (guards the AC1 one-command `results.csv` deliverable) and made `score_model` re-raise a `joblib.dump` failure instead of silently emitting `model_file_size_bytes = 0`. Re-verified: `pytest tests/test_benchmark.py` → 7 passed; CLI `python -m experiments.benchmark.run_benchmark` → exit 0, `results.csv` written, XGBoost (MAE 39.63 / MAPE 8.04% / R² 0.9785) beats seasonal_naive (MAE 153.00 / MAPE 24.10% / R² 0.7110).
+- One item deferred (pre-existing, environmental, out of Story 4.1 scope): `tests/test_smoke.py::test_api_forecast_predict_warm_p95` intermittently exceeds its 300 ms budget on this local machine (348–416 ms). `test_smoke.py` is not in the Story 4.1 diff and the flake reproduces standalone; recorded in `deferred-work.md` rather than patching unrelated forecast code.
 
 ## Design Notes
 
@@ -102,3 +104,25 @@ context: []
 - `cd ai-service && python -m experiments.benchmark.run_benchmark` — expected: writes `experiments/benchmark/results.csv` with ≥ 2 rows and all 8 columns finite; XGBoost beats Seasonal-naive on MAE/RMSE.
 - `pytest ai-service/tests/test_benchmark.py -q` — expected: all pass (schema, naive=`lag_24h`, pluggability, accuracy determinism, missing-dataset failure).
 - Determinism spot-check: run the command twice and diff the accuracy columns of `results.csv` — expected: identical.
+
+## Code Review Findings — 2026-10-10 (4-layer adversarial: blind-hunter, edge-case-hunter, verification-gap, acceptance-auditor)
+
+Diff reviewed: commit `a6f7baf` (baseline `1d3807c`). Ground-truthed by running `pytest tests/test_benchmark.py` (6 passed) and `python -m experiments.benchmark.run_benchmark` (exit 0; `results.csv` written; XGBoost MAE 39.63 / MAPE 8.04% / R² 0.9785 beats seasonal_naive).
+
+**Patch (2):**
+- [x] [Review][Patch] No automated test guards the `execute_benchmark` happy path. Every happy-path test calls `run_scoring` directly; only the missing-dataset branch touches `execute_benchmark`, so a regression to the `to_csv`/default-path/column logic (AC1's one-command `results.csv` deliverable that Story 4.4 consumes) would ship green. Add a pytest: `execute_benchmark(data_path=<fixture>, output_path=tmp_path/"results.csv")` → assert the file exists, `pd.read_csv` it, 2 rows, `list(df.columns) == BENCHMARK_COLUMNS`. [ai-service/tests/test_benchmark.py]
+- [x] [Review][Patch] `score_model` swallows a `joblib.dump` failure into `model_file_size_bytes = 0` silently (`except Exception: file_size_bytes = 0`), contradicting the I/O-matrix ">0 / no empty cells" guarantee and the project's fail-loudly ethos — a future unpicklable model would emit an invalid `0` into `results.csv` with no error. Re-raise (naming the model) instead of emitting `0`. [ai-service/experiments/benchmark/benchmark.py:85-86]
+
+**Rejected (12):**
+- (false) `R²` summary print raises `UnicodeEncodeError` on a Windows cp1252 console: verified empirically — the CLI ran to exit 0 and printed `R²` fine; U+00B2 is representable in cp1252/cp437.
+- (false) broad `except Exception` in `main()` reports post-write success as failure: no reachable post-write exception (the hypothesized Unicode trigger is false); the CLI exits 0.
+- (false) MAPE returns `inf` on zero readings, breaking the "finite" contract: scikit-learn clamps the zero denominator to epsilon (finite), `train_models.py` uses the identical MAPE, and real building readings are never 0 — empirically MAPE = 8.04/24.10, finite.
+- (low) `run_scoring` raises `KeyError` on an empty model set: unreachable — the registry always holds `seasonal_naive`+`xgboost` and no caller passes `models=[]`.
+- (low) `register_forecaster` silently overwrites on a duplicate `name`: requires a developer naming mistake; no collision in this story. Worth a duplicate-key guard when 4.2/4.3 add forecasters.
+- (low) `score_model` metrics raise on an empty `test_df`: unreachable — the 80/20 split on the real/fixture data always yields a non-empty test partition.
+- (low) determinism tested in-process, not across processes: the in-process twice-run test covers practical determinism; a subprocess harness is disproportionate for a theoretical thread-order risk.
+- (reject — impl correct; fix edits spec) `n_jobs=-1` vs the Design-Notes determinism caution: the frozen "Always" clause requires the same hyperparameters as `train_models.py` (which sets `n_jobs=-1`); the impl correctly prioritized the frozen clause and `test_benchmark_determinism` passes.
+- (low) undocumented `ECOTRACK_DATA_PATH` env override in `get_default_paths`: harmless (files-only; default unchanged) convenience input beyond the spec; no reachable harm.
+- (reject — intentional) `.gitignore` narrowed `experiments/` → `experiments/logs/`: deliberate, to track the new benchmark code; the generated `results.csv` stays ignored via `*.csv` (confirmed by `git check-ignore`).
+- (low) `get_registry()` is unused: a harmless public accessor; no defect.
+- (low) `print_summary_table` has no test, and the Code Map names `score_all()` vs the impl's `run_scoring()`: display-only / non-frozen descriptive naming, no behavioral impact.

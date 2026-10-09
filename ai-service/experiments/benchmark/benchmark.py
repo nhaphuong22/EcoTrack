@@ -71,19 +71,19 @@ def score_model(
     r2 = float(r2_score(y_test, y_pred))
 
     # 4. Measure Serialized Model Artifact Size
-    file_size_bytes = 0
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".joblib", delete=False) as tmp_file:
-            tmp_path = Path(tmp_file.name)
+    with tempfile.NamedTemporaryFile(suffix=".joblib", delete=False) as tmp_file:
+        tmp_path = Path(tmp_file.name)
 
-        try:
-            joblib.dump(model, tmp_path)
-            file_size_bytes = tmp_path.stat().st_size
-        finally:
-            if tmp_path.exists():
-                tmp_path.unlink()
-    except Exception:
-        file_size_bytes = 0
+    try:
+        joblib.dump(model, tmp_path)
+        file_size_bytes = tmp_path.stat().st_size
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to serialize model '{model.name}' for size measurement: {e}"
+        ) from e
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
 
     return {
         "model": str(model.name),
