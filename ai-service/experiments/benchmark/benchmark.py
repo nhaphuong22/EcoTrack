@@ -25,6 +25,7 @@ BENCHMARK_COLUMNS: List[str] = [
     "training_time_s",
     "mean_inference_latency_ms",
     "model_file_size_bytes",
+    "train_window_hours",
 ]
 
 
@@ -48,7 +49,7 @@ def score_model(
     Returns:
     --------
     Dict[str, Any]:
-        Dictionary containing all 8 standard benchmark columns.
+        Dictionary containing all 9 standard benchmark columns.
     """
     # 1. Measure Training Time
     start_fit = time.perf_counter()
@@ -94,6 +95,8 @@ def score_model(
         "training_time_s": float(fit_duration_s),
         "mean_inference_latency_ms": float(mean_latency_ms),
         "model_file_size_bytes": int(file_size_bytes),
+        # Full-data models report their full train-row count; SARIMAX reports its recent window.
+        "train_window_hours": int(getattr(model, "train_window_used", len(train_df))),
     }
 
 

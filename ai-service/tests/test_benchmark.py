@@ -19,6 +19,8 @@ from experiments.benchmark.models import (
     BaseForecaster,
     SeasonalNaiveForecaster,
     XGBoostForecaster,
+    SARIMAXForecaster,
+    SARIMAX_TRAIN_WINDOW_HOURS,
     _FORECASTER_REGISTRY,
     get_registered_forecasters,
     register_forecaster,
@@ -44,18 +46,18 @@ def sample_partitions():
 def test_benchmark_happy_path_schema_and_comparison(sample_partitions, tmp_path):
     """
     Verify happy path execution:
-    - Results table has exactly 2 rows ('seasonal_naive' and 'xgboost').
-    - All 8 standard columns are present, non-null, and finite.
+    - Results table has exactly 3 rows ('seasonal_naive', 'xgboost', 'sarimax').
+    - All 9 standard columns are present, non-null, and finite.
     - XGBoost outperforms Seasonal-naive on MAE and RMSE.
     """
     train_df, test_df = sample_partitions
     results_df = run_scoring(train_df=train_df, test_df=test_df)
 
     assert list(results_df.columns) == BENCHMARK_COLUMNS
-    assert len(results_df) == 2
+    assert len(results_df) == 3
 
     model_names = set(results_df["model"])
-    assert model_names == {"seasonal_naive", "xgboost"}
+    assert model_names == {"seasonal_naive", "xgboost", "sarimax"}
 
     # No NaN or infinite values
     for col in BENCHMARK_COLUMNS:
@@ -74,7 +76,7 @@ def test_execute_benchmark_writes_results_csv(tmp_path):
     """
     Verify the end-to-end CLI happy path (AC1 one-command deliverable consumed by Story 4.4):
     - execute_benchmark writes results.csv at the requested output path.
-    - The written file parses back with exactly the 8 standard columns and 2 model rows.
+    - The written file parses back with exactly the 9 standard columns and 3 model rows.
     """
     fixture_path = Path(__file__).resolve().parent / "fixtures" / "office_building_sample.csv"
     output_file = tmp_path / "results.csv"
@@ -85,8 +87,8 @@ def test_execute_benchmark_writes_results_csv(tmp_path):
 
     written_df = pd.read_csv(output_file)
     assert list(written_df.columns) == BENCHMARK_COLUMNS
-    assert len(written_df) == 2
-    assert set(written_df["model"]) == {"seasonal_naive", "xgboost"}
+    assert len(written_df) == 3
+    assert set(written_df["model"]) == {"seasonal_naive", "xgboost", "sarimax"}
     assert written_df["model_file_size_bytes"].gt(0).all(), "Every serialized size must be > 0"
 
     # Returned frame matches what was persisted
@@ -142,7 +144,7 @@ def test_benchmark_pluggability(sample_partitions):
         assert any(m.name == "constant_mean" for m in registered)
 
         results_df = run_scoring(train_df=train_df, test_df=test_df)
-        assert len(results_df) == 3
+        assert len(results_df) == 4
         assert "constant_mean" in results_df["model"].values
 
         mean_row = results_df[results_df["model"] == "constant_mean"].iloc[0]
@@ -191,6 +193,58 @@ def test_benchmark_mean_latency_and_file_size(sample_partitions):
     naive_size = results_df[results_df["model"] == "seasonal_naive"]["model_file_size_bytes"].iloc[0]
     xgb_size = results_df[results_df["model"] == "xgboost"]["model_file_size_bytes"].iloc[0]
     assert xgb_size > naive_size
+
+
+def test_sarimax_predict_length_and_exog_alignment(sample_partitions):
+    """
+    Verify SARIMAXForecaster:
+    - predict returns a finite float ndarray of exactly len(test_df).
+    - fit records the documented recent window (<= SARIMAX_TRAIN_WINDOW_HOURS).
+    """
+    train_df, test_df = sample_partitions
+    model = SARIMAXForecaster()
+    model.fit(train_df)
+    preds = model.predict(test_df)
+
+    assert isinstance(preds, np.ndarray)
+    assert len(preds) == len(test_df)
+    assert np.isfinite(preds).all(), "SARIMAX predictions contain NaN/inf"
+
+    # Trains on the documented recent window, not the full partition.
+    assert model.train_window_used == min(SARIMAX_TRAIN_WINDOW_HOURS, len(train_df))
+    assert model.train_window_used <= len(train_df)
+
+
+def test_sarimax_row_and_window_in_results(sample_partitions):
+    """
+    Verify SARIMAX appears as a scored row (I/O matrix):
+    - 'sarimax' is present with all 9 columns finite.
+    - Its train_window_hours equals the documented window and is < the full-train count
+      reported by seasonal_naive/xgboost.
+    """
+    train_df, test_df = sample_partitions
+    results_df = run_scoring(train_df=train_df, test_df=test_df)
+
+    sarimax_row = results_df[results_df["model"] == "sarimax"].iloc[0]
+    naive_row = results_df[results_df["model"] == "seasonal_naive"].iloc[0]
+
+    for col in BENCHMARK_COLUMNS:
+        assert pd.notna(sarimax_row[col]), f"sarimax column {col} is NaN/empty"
+
+    assert int(sarimax_row["train_window_hours"]) == SARIMAX_TRAIN_WINDOW_HOURS
+    assert int(sarimax_row["train_window_hours"]) < int(naive_row["train_window_hours"])
+
+
+def test_sarimax_determinism(sample_partitions):
+    """SARIMAX accuracy columns are bit-identical across repeated fits on the same data."""
+    train_df, test_df = sample_partitions
+
+    run1 = SARIMAXForecaster().fit(train_df)
+    preds1 = run1.predict(test_df)
+    run2 = SARIMAXForecaster().fit(train_df)
+    preds2 = run2.predict(test_df)
+
+    np.testing.assert_array_equal(preds1, preds2, err_msg="SARIMAX predictions were not deterministic")
 
 
 def test_benchmark_missing_dataset_raises(tmp_path):

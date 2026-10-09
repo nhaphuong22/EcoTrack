@@ -7,6 +7,7 @@ from experiments.benchmark.models import (
     BaseForecaster,
     SeasonalNaiveForecaster,
     XGBoostForecaster,
+    SARIMAXForecaster,
     get_registered_forecasters,
     register_forecaster,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "BaseForecaster",
     "SeasonalNaiveForecaster",
     "XGBoostForecaster",
+    "SARIMAXForecaster",
     "register_forecaster",
     "get_registered_forecasters",
     "score_model",

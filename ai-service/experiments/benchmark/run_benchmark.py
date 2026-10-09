@@ -88,12 +88,12 @@ def execute_benchmark(
 
 def print_summary_table(results_df: pd.DataFrame) -> None:
     """Prints a clean ASCII summary table of the benchmark results."""
-    print("\n" + "=" * 90)
-    print(" " * 28 + "ECOTRACK FORECASTING BENCHMARK RESULTS")
-    print("=" * 90)
-    header = f"{'Model':<18} | {'MAE (kWh)':<10} | {'RMSE (kWh)':<10} | {'MAPE (%)':<9} | {'R²':<7} | {'Train (s)':<9} | {'Latency (ms)':<12} | {'Size (KB)':<9}"
+    print("\n" + "=" * 108)
+    print(" " * 37 + "ECOTRACK FORECASTING BENCHMARK RESULTS")
+    print("=" * 108)
+    header = f"{'Model':<18} | {'MAE (kWh)':<10} | {'RMSE (kWh)':<10} | {'MAPE (%)':<9} | {'R²':<7} | {'Train (s)':<9} | {'Latency (ms)':<12} | {'Size (KB)':<9} | {'Window (h)':<10}"
     print(header)
-    print("-" * 90)
+    print("-" * 108)
     for _, row in results_df.iterrows():
         size_kb = row["model_file_size_bytes"] / 1024.0
         line = (
@@ -104,10 +104,11 @@ def print_summary_table(results_df: pd.DataFrame) -> None:
             f"{row['r2']:<7.4f} | "
             f"{row['training_time_s']:<9.2f} | "
             f"{row['mean_inference_latency_ms']:<12.4f} | "
-            f"{size_kb:<9.1f}"
+            f"{size_kb:<9.1f} | "
+            f"{int(row['train_window_hours']):<10}"
         )
         print(line)
-    print("=" * 90 + "\n")
+    print("=" * 108 + "\n")
 
 
 def main() -> None:
