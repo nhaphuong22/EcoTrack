@@ -85,13 +85,127 @@ def test_api_energy_timeseries(client):
 
 
 def test_api_forecast_predict(client):
-    """Verify internal 24h forecast endpoint."""
+    """Verify internal 24h forecast endpoint: 24 forward points, ordered and bounded."""
     response = client.get("/internal/forecast/predict")
     assert response.status_code == 200
     data = response.json()
     assert data["building_id"] == "office_tower_01"
     assert data["horizon_hours"] == 24
-    assert len(data["forecast"]) == 24
+    forecast = data["forecast"]
+    assert len(forecast) == 24
+
+    # Last observed timestamp from the serving frame (what the timeseries endpoint serves).
+    from src.data_pipeline.serving_frame import get_serving_frame
+    last_observed = get_serving_frame()["timestamp"].iloc[-1]
+
+    timestamps = [pt["timestamp"] for pt in forecast]
+    # ISO 8601 UTC with Z suffix
+    assert all(ts.endswith("Z") for ts in timestamps)
+    # Strictly increasing
+    assert timestamps == sorted(timestamps)
+    assert len(set(timestamps)) == 24
+    # Every forecast timestamp is strictly later than the last observed reading
+    assert all(ts > last_observed for ts in timestamps)
+
+    # lower <= predicted <= upper and lower floored at 0
+    for pt in forecast:
+        assert pt["lower_bound_95"] <= pt["predicted_kwh"] + 1e-6
+        assert pt["predicted_kwh"] <= pt["upper_bound_95"] + 1e-6
+        assert pt["lower_bound_95"] >= 0.0
+
+
+def test_api_forecast_predict_warm_p95(client):
+    """NFR3: warm endpoint answers under 300 ms at p95."""
+    import time
+
+    # Warm-up (pays the one-time cold-start load).
+    assert client.get("/internal/forecast/predict").status_code == 200
+
+    durations = []
+    for _ in range(20):
+        start = time.perf_counter()
+        res = client.get("/internal/forecast/predict")
+        durations.append((time.perf_counter() - start) * 1000.0)
+        assert res.status_code == 200
+
+    durations.sort()
+    # 95th percentile (index 18 of 20 sorted samples).
+    p95 = durations[int(0.95 * len(durations)) - 1]
+    assert p95 < 300.0, f"p95 {p95:.1f} ms exceeded 300 ms budget"
+
+
+def test_api_forecast_predict_insufficient_history(client):
+    """<24h history -> endpoint returns 422 ERR_INSUFFICIENT_HISTORY envelope."""
+    import pandas as pd
+    import src.data_pipeline.serving_frame as sf
+
+    # Warm the cache so the model/metadata are loaded; the short frame is the only failure.
+    sf.get_serving_frame()
+    short_frame = pd.DataFrame({
+        "timestamp": [f"2026-01-01T{h:02d}:00:00Z" for h in range(10)],
+        "meter_reading_kwh": [100.0 + h for h in range(10)],
+        "outdoor_temperature_c": [20.0 + h for h in range(10)],
+    })
+
+    original = sf.get_serving_frame
+    try:
+        sf.get_serving_frame = lambda now=None: short_frame
+        res = client.get("/internal/forecast/predict")
+    finally:
+        sf.get_serving_frame = original
+        sf.reset_serving_cache()
+
+    assert res.status_code == 422
+    body = res.json()
+    assert body["code"] == "ERR_INSUFFICIENT_HISTORY"
+    assert "24" in body["detail"]
+
+
+def test_api_forecast_predict_missing_artifact(client):
+    """Missing XGBoost artifact -> endpoint returns 503 ERR_MODEL_NOT_FOUND naming the file."""
+    import os
+    import tempfile
+    import src.data_pipeline.serving_frame as sf
+
+    sf.reset_serving_cache()
+    with tempfile.TemporaryDirectory() as empty_dir:
+        old_models_dir = os.environ.get("ECOTRACK_MODELS_DIR")
+        os.environ["ECOTRACK_MODELS_DIR"] = empty_dir
+        try:
+            res = client.get("/internal/forecast/predict")
+            assert res.status_code == 503
+            body = res.json()
+            assert body["code"] == "ERR_MODEL_NOT_FOUND"
+            assert "xgboost_forecaster.joblib" in body["detail"]
+            assert len(os.listdir(empty_dir)) == 0, "no model should be trained or saved on error"
+        finally:
+            if old_models_dir is not None:
+                os.environ["ECOTRACK_MODELS_DIR"] = old_models_dir
+            else:
+                os.environ.pop("ECOTRACK_MODELS_DIR", None)
+            sf.reset_serving_cache()
+
+
+def test_api_forecast_dataset_missing_503(client):
+    """Matrix: Dataset missing -> 503 {"code": "ERR_DATA_NOT_FOUND"} on the forecast endpoint."""
+    import os
+    from pathlib import Path
+    from src.data_pipeline.serving_frame import reset_serving_cache
+
+    reset_serving_cache()
+    non_existent = Path("non_existent_forecast_data.csv").resolve()
+    old_data_path = os.environ.get("ECOTRACK_DATA_PATH")
+    os.environ["ECOTRACK_DATA_PATH"] = str(non_existent)
+    try:
+        response = client.get("/internal/forecast/predict")
+        assert response.status_code == 503
+        assert response.json()["code"] == "ERR_DATA_NOT_FOUND"
+    finally:
+        if old_data_path is not None:
+            os.environ["ECOTRACK_DATA_PATH"] = old_data_path
+        else:
+            os.environ.pop("ECOTRACK_DATA_PATH", None)
+        reset_serving_cache()
 
 
 def test_api_anomalies_detect(client):

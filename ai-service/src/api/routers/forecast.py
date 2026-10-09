@@ -2,19 +2,16 @@ import asyncio
 from typing import Any, Dict, List
 from fastapi import APIRouter
 
-from src.data_pipeline.bdg2_loader import data_loader
-from src.models.forecaster_xgboost import energy_forecaster
+from src.data_pipeline.serving_frame import predict_next_24h
 
 router = APIRouter(prefix="/internal/forecast", tags=["AI Forecasting"])
 
 
 def _get_forecast() -> List[Dict[str, Any]]:
-    df = data_loader.get_or_create_data()
-    df_fc = energy_forecaster.predict_horizon(df)
-    last_24h = df_fc.tail(24)
+    forecast_df = predict_next_24h()
 
     results = []
-    for _, row in last_24h.iterrows():
+    for _, row in forecast_df.iterrows():
         results.append({
             "timestamp": str(row["timestamp"]),
             "predicted_kwh": float(row["predicted_kwh"]),

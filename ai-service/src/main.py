@@ -6,7 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
-from src.data_pipeline.serving_frame import ModelArtifactError, ServingDataError
+from src.data_pipeline.serving_frame import (
+    InsufficientHistoryError,
+    ModelArtifactError,
+    ServingDataError,
+)
 
 # Ensure ai-service root is in sys.path so `src...` imports work from any working directory
 AI_SERVICE_DIR = Path(__file__).resolve().parent.parent
@@ -52,6 +56,14 @@ async def model_artifact_error_handler(request, exc: ModelArtifactError):
     return JSONResponse(
         status_code=503,
         content={"detail": str(exc), "code": "ERR_MODEL_NOT_FOUND"},
+    )
+
+
+@app.exception_handler(InsufficientHistoryError)
+async def insufficient_history_error_handler(request, exc: InsufficientHistoryError):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": str(exc), "code": "ERR_INSUFFICIENT_HISTORY"},
     )
 
 @app.get("/")
