@@ -62,8 +62,8 @@ development_status:
   3-8-measure-rag-quality: backlog
   epic-3-retrospective: optional
 
-  epic-4: backlog
-  4-1-benchmark-harness-with-naive-and-xgboost-baselines: backlog
+  epic-4: in-progress
+  4-1-benchmark-harness-with-naive-and-xgboost-baselines: review
   4-2-add-a-statistical-baseline-sarimax: backlog
   4-3-add-an-lstm-forecaster: backlog
   4-4-benchmark-report-and-model-recommendation: backlog
