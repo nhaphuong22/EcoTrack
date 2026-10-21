@@ -49,6 +49,12 @@ FR25: Retraining can be triggered by `POST /internal/mlops/retrain` and by a dai
 FR26: `GET /internal/mlops/status` returns the current model, its metrics, drift status and retraining history.
 FR27: The Isolation Forest detector is evaluated for precision, recall and F1 against the `is_injected_anomaly` labels and the two demo scenarios.
 
+**Technical depth additions (owner decision 2026-10-10)**
+
+FR46: The benchmark scores every forecaster at each forecast horizon from 1 to 24 hours ahead and exports the per-horizon results, so models are compared at the horizon they are used for and not only one step ahead.
+FR47: The hyperparameters of the XGBoost and LSTM forecasters are selected by an automated search (Optuna) with the same trial budget per model, scored on time-ordered validation slices of the training split only, with every trial logged to MLflow.
+FR48: The served forecast carries prediction intervals learned by quantile (pinball-loss) training, replacing the fixed `±1.96 × RMSE` band, and their empirical coverage on the held-out test split is measured and reported.
+
 **RAG and evaluation (Member 3)**
 
 FR28: A knowledge base of 10–20 short documents exists under `ai-service/knowledge_base/`, covering QCVN 09:2017/BXD excerpts, EVN time-of-use tariffs, Chiller/HVAC operating guidance and energy-saving practices.
@@ -107,12 +113,13 @@ No UX design contract exists for this project. UI requirements are carried by FR
 
 ### Stretch Backlog (not turned into stories)
 
-- TFT / PatchTST via `neuralforecast`; multi-fold `TimeSeriesSplit`; forecast intervals for all models.
+- TFT / PatchTST via `neuralforecast`; multi-fold `TimeSeriesSplit`; forecast intervals for the benchmark-only models (intervals for the served forecast are now Story 4.13).
 - Evidently HTML drift report; hot model reload without restart.
 - Gemini native function calling replacing the keyword router; Ollama offline fallback; reranking.
 - Mosquitto MQTT ingest; `docker-compose.prod.yml` with multi-stage images; Redis cache.
 - Mini Recharts charts inside chat messages; KaTeX; Three.js 3D building.
-- ONNX export of XGBoost / Isolation Forest / LSTM with parity tests (pending team decision).
+- ONNX export of XGBoost / Isolation Forest / LSTM with parity tests. Owner decision 2026-10-10: `.joblib` stays the serving format for now; if time allows, add ONNX as an extra benchmark row (for example `xgboost_onnx`) that reports prediction parity, latency and file size against the native model. Note that SARIMAX has no ONNX exporter and that retraining still needs the native libraries.
+- Multi-building experiment (only under `ai-service/experiments/`, no serving change): train one LSTM on about ten BDG2 office buildings and compare it, as an extra benchmark row, with the LSTM trained on the single served building.
 
 ### FR Coverage Map
 
@@ -149,6 +156,9 @@ FR42: Epic 2 - Live floor plan (Story 2.2)
 FR43: Epic 3 - Streaming Copilot with Markdown and sources (Story 3.6)
 FR44: Epic 4 - MLOps page (Story 4.12)
 FR45: Epic 2 - Real system status (Story 2.3)
+FR46: Epic 4 - Per-horizon benchmark scoring (Story 4.4)
+FR47: Epic 4 - Automated hyperparameter search logged to MLflow (Story 4.5)
+FR48: Epic 4 - Learned prediction intervals with measured coverage (Story 4.13)
 
 ## Epic List
 
@@ -658,6 +668,8 @@ So that the value of RAG is demonstrated with numbers.
 
 The team proves which forecaster to serve with a reproducible benchmark, then runs it under MLflow with drift detection, guarded retraining and an admin monitoring page. New code lives under `ai-service/experiments/benchmark/` and `ai-service/src/mlops/` and stays callable as plain Python.
 
+**Working agreement — model training runs (added 2026-10-10 by the project owner):** whenever a story reaches a step that runs a Python file which trains a model (for example `python -m experiments.benchmark.run_benchmark`, `python -m src.models.train_models`, or a retraining script), the AI agent must not run it. It prints the exact command, including the working directory, and the project owner runs it and reports the output back. This applies to every story in this epic, in build, verification and review.
+
 ### Story 4.1: Benchmark harness with naive and XGBoost baselines
 
 As an ML engineer,
@@ -731,9 +743,17 @@ As a project reviewer,
 I want charts and a written conclusion from the benchmark,
 So that I can see at a glance which model was chosen and the evidence for it.
 
-**Implements:** FR21
+**Implements:** FR21, FR46
 
 **Acceptance Criteria:**
+
+**Given** the four registered forecasters
+**When** the benchmark runs
+**Then** each one is also scored at every horizon from 1 to 24 hours ahead on the same test split, using only readings observed before the forecast origin, and the per-horizon MAE and RMSE are written to `results_by_horizon.csv`
+
+**Given** the per-horizon results
+**When** the report is generated
+**Then** a fourth chart shows error against horizon for all models, and the recommendation states which model is best at 1 hour and at 24 hours ahead
 
 **Given** a completed `results.csv`
 **When** I run the report command
@@ -753,9 +773,21 @@ As an ML engineer,
 I want each training run recorded with its parameters, metrics and artifacts,
 So that I can trace which run produced the model in production.
 
-**Implements:** FR23
+**Implements:** FR23, FR47
 
 **Acceptance Criteria:**
+
+**Given** the XGBoost and LSTM forecasters
+**When** the hyperparameter search command runs
+**Then** Optuna explores a documented search space for each model with the same number of trials, scores every trial on time-ordered validation slices cut from the training split, and never reads the test split
+
+**Given** a search in progress
+**When** a trial finishes
+**Then** its parameters and validation metrics are logged to MLflow as a run nested under that model's search
+
+**Given** a finished search
+**When** the best parameters are applied
+**Then** the benchmark is re-run with them and the tuned and untuned rows can be compared for both models
 
 **Given** MLflow configured with a local SQLite backend
 **When** `train_models.py` runs
@@ -923,6 +955,34 @@ So that I can decide when to retrain and show how the system manages itself.
 **Given** a status field is `null`
 **When** the page renders
 **Then** that section shows an empty state instead of failing
+
+### Story 4.13: Forecast with learned prediction intervals
+
+Scheduled after Story 4.5 (it is numbered 4.13 so that existing story keys keep their numbers).
+
+As a building operator,
+I want the forecast band to be wider when the model is less certain and narrower when it is more certain,
+So that I can judge how much to trust the forecast at a given hour.
+
+**Implements:** FR48
+
+**Acceptance Criteria:**
+
+**Given** the forecaster chosen for serving
+**When** it is trained
+**Then** it also learns the 2.5%, 50% and 97.5% quantiles with a pinball (quantile) loss, using XGBoost's quantile objective or a hand-written loss for the LSTM
+
+**Given** the held-out test split
+**When** the intervals are evaluated
+**Then** the report states the empirical coverage of the 95% interval and its mean width, next to the same two numbers for the current `±1.96 × RMSE` band
+
+**Given** `GET /internal/forecast/predict`
+**When** it responds
+**Then** `lower_bound_95` and `upper_bound_95` come from the learned quantiles, the lower bound is never below 0 or above `predicted_kwh`, and the response shape is unchanged
+
+**Given** the quantile artifacts are missing
+**When** the endpoint is called
+**Then** it returns the same explicit `ERR_MODEL_NOT_FOUND` error as for a missing forecaster; it does not fall back to the fixed band silently
 
 ## Epic 5: Secure Access & RBAC
 

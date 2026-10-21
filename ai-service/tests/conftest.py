@@ -83,3 +83,16 @@ def setup_test_environment():
         os.environ.pop("INTERNAL_API_KEY", None)
 
     shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def fast_lstm_epochs(monkeypatch):
+    """Caps LSTM training for every test; real early stopping is exercised in test_benchmark_lstm.py."""
+    try:
+        import experiments.benchmark.lstm as lstm_module
+    except ImportError:
+        # Benchmark extras (requirements-experiments.txt) are not installed; the API tests
+        # do not need them, so there is nothing to cap.
+        return
+    monkeypatch.setattr(lstm_module, "LSTM_MAX_EPOCHS", 2)
+    monkeypatch.setattr(lstm_module, "LSTM_PATIENCE", 1)

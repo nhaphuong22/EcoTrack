@@ -22,7 +22,7 @@ Mở terminal tại thư mục gốc `EcoTrack` và chạy 1 lệnh duy nhất:
 npm run install:all
 ```
 
-*(Lệnh này tự động cài đặt tuần tự: thư viện Express/Prisma cho `backend/`, thư viện React/Tailwind cho `frontend/`, và gói Python Machine Learning từ `ai-service/requirements.txt`)*.
+*(Lệnh này tự động cài đặt tuần tự: thư viện Express/Prisma cho `backend/`, thư viện React/Tailwind cho `frontend/`, và gói Python Machine Learning từ `ai-service/requirements.txt` cùng `ai-service/requirements-experiments.txt`; file thứ hai chứa PyTorch bản CPU và statsmodels cho benchmark, không được cài vào Docker image)*.
 
 ---
 

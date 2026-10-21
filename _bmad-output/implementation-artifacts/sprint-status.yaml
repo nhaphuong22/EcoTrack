@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-08-2026 21:56
-last_updated: 10-09-2026 23:11
+last_updated: 10-10-2026 03:38
 project: EcoTrack
 project_key: NOKEY
 tracking_system: file-system
@@ -62,10 +62,10 @@ development_status:
   3-8-measure-rag-quality: backlog
   epic-3-retrospective: optional
 
-  epic-4: backlog
-  4-1-benchmark-harness-with-naive-and-xgboost-baselines: backlog
-  4-2-add-a-statistical-baseline-sarimax: backlog
-  4-3-add-an-lstm-forecaster: backlog
+  epic-4: in-progress
+  4-1-benchmark-harness-with-naive-and-xgboost-baselines: done
+  4-2-add-a-statistical-baseline-sarimax: done
+  4-3-add-an-lstm-forecaster: done
   4-4-benchmark-report-and-model-recommendation: backlog
   4-5-track-training-runs-and-register-the-serving-model: backlog
   4-6-detect-data-drift-and-accuracy-decay: backlog
@@ -75,6 +75,7 @@ development_status:
   4-10-report-model-and-drift-status: backlog
   4-11-expose-model-monitoring-to-admins: backlog
   4-12-monitor-the-model-as-an-admin: backlog
+  4-13-forecast-with-learned-prediction-intervals: backlog
   epic-4-retrospective: optional
 
   epic-5: backlog
