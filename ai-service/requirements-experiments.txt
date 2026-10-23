@@ -1,3 +1,5 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.10.0+cpu
 statsmodels>=0.14.2
+matplotlib>=3.8.0
+pyarrow>=16.0.0

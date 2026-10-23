@@ -47,6 +47,28 @@ class BaseForecaster(ABC):
         """
         pass
 
+    def forecast_grid(self, test_df: pd.DataFrame, horizon: int = 24) -> np.ndarray:
+        """
+        Per-origin multi-step forecast grid for the Story 4.4 per-horizon benchmark.
+
+        Returns a float array of shape (len(test_df), horizon) where entry [p, h-1] is
+        the forecast for the target at test position ``p + h``, made from forecast origin
+        ``p`` using only meter readings observed up to and including position ``p`` (the
+        shared rolling-origin protocol). Exogenous ``air_temperature`` is supplied as the
+        actual future value (perfect-forecast covariate). Entries whose target ``p + h``
+        falls past the end of the test span are left as ``np.nan`` (span-edge truncation).
+
+        By construction ``grid[p, 0]`` (origin ``p``, horizon 1, target ``p + 1``)
+        reconciles with the model's hour-1 ``predict(test_df)[p + 1]``.
+
+        Must be called after :meth:`fit`. The base class does not implement it because
+        each model fills its 24-vector in its own way; the four benchmark forecasters
+        override it.
+        """
+        raise NotImplementedError(
+            f"{self.name} does not implement forecast_grid for per-horizon scoring"
+        )
+
 
 # Global model registry mapping model identifier to model class
 _FORECASTER_REGISTRY: Dict[str, Type[BaseForecaster]] = {}
@@ -98,6 +120,22 @@ class SeasonalNaiveForecaster(BaseForecaster):
             raise KeyError("test_df must contain engineered 'lag_24h' column for SeasonalNaiveForecaster")
         return test_df["lag_24h"].to_numpy(dtype=float)
 
+    def forecast_grid(self, test_df: pd.DataFrame, horizon: int = 24) -> np.ndarray:
+        # The seasonal-naive forecast for any target row q is the reading 24 h earlier
+        # (its engineered lag_24h), independent of the origin. For every horizon h <= 24,
+        # q - 24 <= origin p, so the value is always an observed reading.
+        if "lag_24h" not in test_df.columns:
+            raise KeyError("test_df must contain engineered 'lag_24h' column for SeasonalNaiveForecaster")
+        lag_24h = test_df["lag_24h"].to_numpy(dtype=float)
+        n = len(test_df)
+        grid = np.full((n, horizon), np.nan, dtype=float)
+        for h in range(1, horizon + 1):
+            if h >= n:
+                break
+            target = np.arange(h, n)  # target positions q; origin p = q - h
+            grid[target - h, h - 1] = lag_24h[target]
+        return grid
+
 
 @register_forecaster
 class XGBoostForecaster(BaseForecaster):
@@ -131,6 +169,33 @@ class XGBoostForecaster(BaseForecaster):
         X_test = test_df[XGB_FEATURE_COLUMNS]
         predictions = self.model.predict(X_test)
         return np.asarray(predictions, dtype=float)
+
+    def forecast_grid(self, test_df: pd.DataFrame, horizon: int = 24) -> np.ndarray:
+        # Recursive rolling-origin forecast. For a target at position q = p + h the feature
+        # row is the engineered row at q with one substitution: lag_1h (the reading at q-1)
+        # is the model's own prediction for q-1 when q-1 is in the future (h >= 2), and the
+        # observed reading when q-1 == origin p (h == 1). lag_24h (reading at q-24) stays the
+        # observed value because q-24 <= p for every h <= 24, and air_temperature is the actual
+        # future value (perfect-forecast covariate). Vectorised across origins per horizon step.
+        feats = test_df[XGB_FEATURE_COLUMNS].to_numpy(dtype=float)
+        idx_lag1 = XGB_FEATURE_COLUMNS.index("lag_1h")
+        n = len(test_df)
+        grid = np.full((n, horizon), np.nan, dtype=float)
+        prev: Optional[np.ndarray] = None  # step h-1 predictions, indexed by origin p
+        for h in range(1, horizon + 1):
+            if h >= n:
+                break
+            target = np.arange(h, n)  # q; origin p = q - h = arange(0, n - h)
+            feat = feats[target].copy()
+            if h >= 2 and prev is not None:
+                # lag_1h at q = prediction for q-1 = step (h-1) prediction of the same origin p.
+                feat[:, idx_lag1] = prev[: target.size]
+            # Predict through a DataFrame so the column names match the fitted model.
+            feat_df = pd.DataFrame(feat, columns=XGB_FEATURE_COLUMNS)
+            preds = np.asarray(self.model.predict(feat_df), dtype=float)
+            grid[target - h, h - 1] = preds
+            prev = preds
+        return grid
 
 
 # --- SARIMAX statistical baseline configuration (documented, reproducible constants) ---
@@ -198,3 +263,27 @@ class SARIMAXForecaster(BaseForecaster):
             exog=test_df[["air_temperature"]].to_numpy(dtype=float),
         )
         return np.asarray(rolled.fittedvalues, dtype=float)
+
+    def forecast_grid(self, test_df: pd.DataFrame, horizon: int = 24) -> np.ndarray:
+        # Fit-once, no per-origin refit: the parameters stay fixed and only the filter state
+        # advances. For origin p, extend() conditions the fitted model on observed test
+        # readings 0..p, then forecast(h_max) produces the multi-step path with the actual
+        # future air_temperature as exog (perfect-forecast covariate). This is O(n^2) in the
+        # test length but avoids any refit; see the spec's SARIMAX cost decision.
+        if self._results is None:
+            raise RuntimeError("SARIMAXForecaster must be fitted before forecast_grid()")
+        endog = test_df["meter_reading"].to_numpy(dtype=float)
+        exog = test_df[["air_temperature"]].to_numpy(dtype=float)
+        n = len(test_df)
+        grid = np.full((n, horizon), np.nan, dtype=float)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=ConvergenceWarning)
+            for p in range(n - 1):  # origin p forecasts p+1.. ; needs p+1 <= n-1
+                h_max = min(horizon, n - 1 - p)
+                if h_max <= 0:
+                    continue
+                conditioned = self._results.extend(endog=endog[: p + 1], exog=exog[: p + 1])
+                future_exog = exog[p + 1 : p + 1 + h_max]
+                forecast = conditioned.forecast(steps=h_max, exog=future_exog)
+                grid[p, :h_max] = np.asarray(forecast, dtype=float)
+        return grid
