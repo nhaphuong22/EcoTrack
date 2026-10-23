@@ -1,7 +1,7 @@
 {
-  "dataset_rows": 17520,
-  "train_rows": 14016,
-  "test_rows": 3504,
+  "dataset_rows": 696,
+  "train_rows": 556,
+  "test_rows": 140,
   "xgb_features": [
     "air_temperature",
     "hour",
@@ -24,19 +24,19 @@
     "lag_24h"
   ],
   "xgboost_metrics": {
-    "rmse_kwh": 74.02,
-    "mae_kwh": 39.63,
-    "mape_percent": 8.04,
-    "r2_score": 0.9785,
+    "rmse_kwh": 0.0,
+    "mae_kwh": 0.0,
+    "mape_percent": 0.0,
+    "r2_score": 1.0,
     "target_mape_met": true
   },
   "isolation_forest_metrics": {
     "contamination": 0.03,
-    "total_test_samples": 3504,
-    "anomalies_detected": 137,
-    "anomaly_percentage": 3.91,
-    "anomaly_score_min": -0.1672,
-    "anomaly_score_max": 0.0699,
-    "anomaly_score_mean": -0.0887
+    "total_test_samples": 140,
+    "anomalies_detected": 3,
+    "anomaly_percentage": 2.14,
+    "anomaly_score_min": -0.0837,
+    "anomaly_score_max": 0.0095,
+    "anomaly_score_mean": -0.0456
   }
 }

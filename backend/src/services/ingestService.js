@@ -1,4 +1,5 @@
 const prisma = require('../db');
+const readingStreamService = require('./readingStreamService');
 
 // ponytail: single-batch createMany with skipDuplicates; partition or stream if ingestion volume exceeds 10k/s
 async function ingestReadings(readings) {
@@ -56,6 +57,19 @@ async function ingestReadings(readings) {
     data: records,
     skipDuplicates: true,
   });
+
+  if (result.count > 0) {
+    for (const r of records) {
+      readingStreamService.broadcastReading({
+        building_id: r.building_id,
+        zone_id: r.zone_id,
+        timestamp: r.timestamp.toISOString(),
+        meter_reading_kwh: r.meter_reading_kwh,
+        outdoor_temperature_c: r.outdoor_temperature_c,
+        relative_humidity_pct: r.relative_humidity_pct,
+      });
+    }
+  }
 
   return { stored: result.count };
 }

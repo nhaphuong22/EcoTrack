@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
-from src.config import get_internal_api_key
+from src.config import get_internal_api_key, get_models_dir
 from src.data_pipeline.serving_frame import (
     InsufficientHistoryError,
     ModelArtifactError,
@@ -93,8 +93,28 @@ def root():
     }
 
 @app.get("/health")
-def health():
-    return {"status": "healthy"}
+def health(details: bool = False):
+    if not details:
+        return {"status": "healthy"}
+
+    models_dir = get_models_dir()
+    xgb_exists = (models_dir / "xgboost_forecaster.joblib").is_file()
+    iso_exists = (models_dir / "isolation_forest.joblib").is_file()
+
+    copilot_engine = "rule_based_fallback"
+    if os.getenv("GEMINI_API_KEY", "").strip():
+        copilot_engine = "google_genai"
+    elif os.getenv("OPENAI_API_KEY", "").strip():
+        copilot_engine = "openai"
+
+    return {
+        "status": "healthy",
+        "models": {
+            "forecast": "loaded" if xgb_exists else "unavailable",
+            "anomaly": "loaded" if iso_exists else "unavailable",
+        },
+        "copilot_engine": copilot_engine,
+    }
 
 if __name__ == "__main__":
     import uvicorn
