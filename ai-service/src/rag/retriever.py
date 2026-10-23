@@ -15,13 +15,8 @@ from src.rag.ingest import (
     get_embedding_model,
 )
 
-_client = None
-_collection = None
-
-
 def get_chroma_collection(persist_dir: Path = None):
     """Retrieves or connects to the persistent Chroma collection."""
-    global _client, _collection
     path = str(persist_dir or CHROMA_PERSIST_DIR)
 
     if not Path(path).exists():
