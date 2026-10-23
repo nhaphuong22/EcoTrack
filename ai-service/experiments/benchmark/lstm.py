@@ -235,3 +235,33 @@ class LSTMForecaster(BaseForecaster):
 
         hour_one = outputs[:, 0].numpy().astype(np.float64)
         return hour_one * self._scaler.scale_[_TARGET_INDEX] + self._scaler.mean_[_TARGET_INDEX]
+
+    def forecast_grid(self, test_df: pd.DataFrame, horizon: int = LSTM_OUTPUT_HOURS) -> np.ndarray:
+        # The network already emits the full 24-hour head; per-horizon reuses it directly,
+        # no future exog needed. The window ending at test position p (history[p+1 : p+1+168])
+        # is window index p+1 and forecasts test[p+1 .. p+24], so grid[p, h-1] = outputs[p+1, h-1].
+        if self._net is None or self._scaler is None or self._history is None:
+            raise RuntimeError("LSTMForecaster must be fitted before forecast_grid()")
+        if horizon > LSTM_OUTPUT_HOURS:
+            raise ValueError(
+                f"LSTMForecaster emits a {LSTM_OUTPUT_HOURS}-hour head; horizon={horizon} exceeds it."
+            )
+
+        raw = test_df[list(LSTM_FEATURES)].to_numpy(dtype=np.float64)
+        scaled = self._scaler.transform(raw).astype(np.float32)
+        history = np.vstack([self._history, scaled])
+        n = len(test_df)
+        windows = np.stack([history[i : i + LSTM_INPUT_HOURS] for i in range(n)])
+
+        self._net.eval()
+        with torch.no_grad():
+            outputs = self._net(torch.from_numpy(windows)).numpy().astype(np.float64)
+        outputs = outputs * self._scaler.scale_[_TARGET_INDEX] + self._scaler.mean_[_TARGET_INDEX]
+
+        grid = np.full((n, horizon), np.nan, dtype=float)
+        for p in range(n - 1):  # origin p uses window p+1 (the window ending at position p)
+            h_max = min(horizon, n - 1 - p)
+            if h_max <= 0:
+                continue
+            grid[p, :h_max] = outputs[p + 1, :h_max]
+        return grid

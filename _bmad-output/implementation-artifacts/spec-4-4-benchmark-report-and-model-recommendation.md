@@ -2,8 +2,8 @@
 title: 'Story 4.4: Benchmark report and model recommendation'
 type: 'feature'
 created: '2026-10-23'
-status: 'draft'
-baseline_commit: 'ef78a9b544641e9bbdd22ca1398314208e1d72ff'
+status: 'done'
+baseline_commit: 'f885e757aac5b05d1096c5348c0f747a56302b04'
 route: 'dispatch'
 review_loop_iteration: 0
 story_keys:
@@ -28,12 +28,13 @@ context: []
 - Per-horizon evaluation uses one **rolling-origin** protocol applied to all four models, recursive for lag-based models, native multi-step where a model supports it — so horizon-1 of the per-horizon table reconciles with the existing hour-1 `results.csv`.
 - **SARIMAX per-origin cost** is bounded by fitting once on the training split and, at each origin, **extending/applying** the fitted model to the observed history with **fixed parameters (no per-origin refit)** before `forecast(24)` — chosen over full refit (too slow over ~3.5k origins) and over striding origins (keeps every-hour origins for all models).
 - The **predictions artifact is Parquet holding all 24 horizons** for every model (`model`, `origin_timestamp`, `horizon_h`, `target_timestamp`, `actual`, `prediction`); `pyarrow` is an experiment-only dependency. CSV / chart-only subsets were rejected to keep the per-horizon data reusable by later analysis and the MLOps page.
+- **Future exogenous `air_temperature`** at horizons `t+1 … t+24` is the **actual observed temperature** supplied as a known covariate (perfect-forecast assumption), applied identically to XGBoost's `air_temperature` feature and SARIMAX's `exog`. Only the forecast **target** (`meter_reading`) is restricted to values observed up to the origin; weather is treated as a known input. Last-observed-hold and 24 h-persistence were rejected as less realistic for a weather-aware load forecast.
 
 ## Boundaries & Constraints
 
 **Always:**
 - Per-horizon scoring reuses the exact Story 4.1 dataset path, `train_models.engineer_features`, and `train_models.split_time_series_data` (80/20 chronological, no shuffle); the test partition is identical to the one `results.csv` is scored on — imported, never re-derived.
-- At every forecast origin `t`, each model's 24-hour path is computed from readings observed **up to and including `t`** only; no reading at `t+1 … t+23` (actual future) ever enters a feature, a lag, or a conditioning window. For XGBoost this means `lag_1h` at horizon `h ≥ 2` is the model's **own** prior-step prediction, while `lag_24h` remains the observed reading at `t+h−24`.
+- At every forecast origin `t`, each model's 24-hour path uses **meter readings** observed **up to and including `t`** only; no actual `meter_reading` at `t+1 … t+23` ever enters a feature, a lag, or a conditioning window. For XGBoost this means `lag_1h` at horizon `h ≥ 2` is the model's **own** prior-step prediction, while `lag_24h` remains the observed reading at `t+h−24`. Exogenous `air_temperature` is exempt from this rule — it is supplied as the actual future value (perfect-forecast covariate, see the locked decision).
 - `results_by_horizon.csv` has one row per `(model, horizon)` for horizons `1..24`, with columns exactly `model`, `horizon_h`, `mae_kwh`, `rmse_kwh`, and no `NaN`/empty cells for scored models.
 - Horizon-1 MAE/RMSE in `results_by_horizon.csv` reconcile with each model's hour-1 figures in `results.csv` to within documented floating tolerance (same test rows, same metric functions) — a divergence beyond tolerance is a leakage/alignment bug, not acceptable noise.
 - The predictions artifact is written by the **harness** (not the report) as a **Parquet file** holding, per model, every `(origin_timestamp, horizon_h)` with its `target_timestamp`, `actual`, and `prediction` for all 24 horizons; it is read-only input to the report.
@@ -76,8 +77,10 @@ context: []
 ## Code Map
 
 - `ai-service/src/models/train_models.py` — reuse (import, do not edit): `load_dataset`/`engineer_features`/`split_time_series_data`, `XGB_FEATURE_COLUMNS` (note it includes `lag_1h` **and** `lag_24h` — the recursion driver). Default dataset `data/processed/office_building_clean.csv`.
-- `ai-service/experiments/benchmark/models.py` — existing `BaseForecaster`/registry and the four forecasters. **Add** a per-origin multi-step capability under one protocol: a default recursive path (uses existing `predict` step-by-step, feeding prediction into `lag_1h`, observed `lag_24h`) overridable by `SARIMAXForecaster` (native `forecast(h)`) and `LSTMForecaster` (24-value head). No change to the existing `fit`/`predict` hour-1 contract.
-- `ai-service/experiments/benchmark/benchmark.py` — existing hour-1 `run_scoring` stays. **Add** a rolling-origin per-horizon scorer that iterates origins across the test split, collects each model's 24-vector, aligns to actuals, and returns per-`(model, horizon)` MAE/RMSE plus the aligned prediction series for the artifact. Pure, unit-testable, no CLI.
+- `ai-service/experiments/benchmark/models.py` — existing `BaseForecaster` (`fit`/`predict`, `name`, `train_window_used`), the `_FORECASTER_REGISTRY` + `register_forecaster`/`get_registered_forecasters`, and `SeasonalNaiveForecaster` (`predict` = `test_df["lag_24h"]`), `XGBoostForecaster` (`model.predict(test_df[XGB_FEATURE_COLUMNS])`), `SARIMAXForecaster` (fits last `SARIMAX_TRAIN_WINDOW_HOURS=336` rows; `predict` = `self._results.extend(endog, exog).fittedvalues`, one-step). **Add** a per-origin 24-step capability under one protocol: a default recursive path for lag models (feed prediction into `lag_1h`, keep observed `lag_24h`) overridden by SARIMAX (`self._results.extend(history≤t, exog≤t).forecast(steps=24, exog=future_exog)`, fixed params) and LSTM. Do not change the existing hour-1 `predict` contract or `train_window_used` semantics.
+- `ai-service/experiments/benchmark/lstm.py` — `LSTMForecaster` already computes the full 24-value head (`self._net(windows)` shape `(n, 24)`) and currently returns only column 0 denormalized (`outputs[:, 0] * scale + mean`, lines 236-237). Per-horizon reuses the same windows and takes `outputs[:, h-1]` denormalized — no future exog needed. Reuse `LSTM_OUTPUT_HOURS=24`, `_TARGET_INDEX`; keep seeds/determinism intact.
+- `ai-service/experiments/benchmark/__init__.py` — imports `models` + `lstm` + `benchmark`, so `python -m experiments.benchmark.*` registers all four forecasters via package import. The per-horizon scorer must be reachable the same way (keep LSTM registration working).
+- `ai-service/experiments/benchmark/benchmark.py` — `BENCHMARK_COLUMNS` (9 cols incl. `train_window_hours`) and hour-1 `score_model`/`run_scoring` stay **unchanged**. **Add** a rolling-origin per-horizon scorer that iterates origins across the test split, collects each model's 24-vector (via the new model capability), aligns to actuals, and returns per-`(model, horizon)` MAE/RMSE plus the aligned prediction rows for the Parquet artifact. Pure, unit-testable, no CLI.
 - `ai-service/experiments/benchmark/run_benchmark.py` — existing CLI, extended to also write `results_by_horizon.csv` and the Parquet predictions artifact (`predictions.parquet`) next to `results.csv` (new `--output` siblings; defaults under `experiments/benchmark/`).
 - `ai-service/requirements-experiments.txt` — add `matplotlib` (report charts) and `pyarrow` (Parquet predictions artifact); the served `requirements.txt`/Dockerfile are untouched.
 - `ai-service/experiments/benchmark/report.py` *(new)* — pure read + plot + format: reads the three artifacts, renders the four PNGs (matplotlib), computes the recommendation deterministically from metrics (accuracy vs latency vs size; best-at-1h / best-at-24h), and returns the `REPORT.md` text and `results.json` object. No fitting/inference.
@@ -88,11 +91,11 @@ context: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Add per-origin multi-step protocol to `models.py` (recursive default; SARIMAX/LSTM native overrides) with the no-leakage guard — FR46.
-- [ ] Add rolling-origin per-horizon scorer to `benchmark.py` returning per-`(model, horizon)` MAE/RMSE + aligned prediction series — FR46.
-- [ ] Extend `run_benchmark.py` to write `results_by_horizon.csv` and the predictions artifact — FR21, FR46.
-- [ ] Add `report.py` + `run_report.py`: four PNG charts, `REPORT.md` (table + charts + recommendation), `results.json` — FR21, FR46.
-- [ ] `test_benchmark_horizon.py` + `test_report.py` covering the full I/O matrix.
+- [x] Add per-origin multi-step protocol to `models.py` (recursive default; SARIMAX/LSTM native overrides) with the no-leakage guard — FR46.
+- [x] Add rolling-origin per-horizon scorer to `benchmark.py` returning per-`(model, horizon)` MAE/RMSE + aligned prediction series — FR46.
+- [x] Extend `run_benchmark.py` to write `results_by_horizon.csv` and the predictions artifact — FR21, FR46.
+- [x] Add `report.py` + `run_report.py`: four PNG charts, `REPORT.md` (table + charts + recommendation), `results.json` — FR21, FR46.
+- [x] `test_benchmark_horizon.py` + `test_report.py` covering the full I/O matrix.
 
 **Acceptance Criteria (from epics.md Story 4.4 — FR21, FR46):**
 - Given the four registered forecasters, when the benchmark runs, then each is scored at every horizon 1–24 h ahead on the same test split using only readings observed before the origin, and per-horizon MAE/RMSE are written to `results_by_horizon.csv`.
@@ -100,6 +103,17 @@ context: []
 - Given a completed `results.csv`, when I run the report command, then three PNG charts are written: metric comparison across models, actual vs predicted for a sample week, and absolute error by hour of day.
 - Given the results, when the report is generated, then `REPORT.md` contains the results table, the three charts, and a recommendation that names the model to serve and weighs accuracy against latency and size.
 - Given the benchmark results, when they are saved, then a `results.json` copy is written for the MLOps page to display.
+
+## Implementation Notes
+
+- **`models.py`** — added `BaseForecaster.forecast_grid(test_df, horizon=24)` (default raises `NotImplementedError`), plus concrete overrides: `SeasonalNaiveForecaster` (grid = observed `lag_24h[q]`), `XGBoostForecaster` (vectorised-per-step recursion; `lag_1h` ← own prior prediction for `h ≥ 2`, observed for `h = 1`; predicts through a `DataFrame` so feature names match the fit), `SARIMAXForecaster` (fit-once; per origin `self._results.extend(obs ≤ t).forecast(h_max, exog=actual future temp)` — no refit, `ConvergenceWarning` silenced). The existing hour-1 `predict` contracts and `train_window_used` are untouched.
+- **`lstm.py`** — added `LSTMForecaster.forecast_grid`; reuses the existing windows and the full 24-value head (`outputs[p+1, :]` is the path from the origin ending at test position `p`), denormalised with the fitted scaler. No future exog needed; guards `horizon <= LSTM_OUTPUT_HOURS`.
+- **`benchmark.py`** — added `DEFAULT_HORIZON=24`, `HORIZON_COLUMNS`, `PREDICTION_COLUMNS`, `score_grid` (grid → per-horizon MAE/RMSE rows + long predictions frame, dropping span-edge `NaN`) and `run_horizon_scoring` (fits each registered model, builds its grid, aggregates). `BENCHMARK_COLUMNS` and the hour-1 `score_model`/`run_scoring` are unchanged.
+- **`run_benchmark.py`** — `execute_benchmark` now also writes `results_by_horizon.csv` and `predictions.parquet` (siblings of `results.csv`, overridable via new `--results-by-horizon`/`--predictions`/`--horizon` flags). NOTE: this means the existing `execute_benchmark` happy path now also runs per-horizon scoring and requires `pyarrow`; CI installs `requirements-experiments.txt`.
+- **`report.py` / `run_report.py`** — pure read + render: `matplotlib` forced to the `Agg` backend before `pyplot` import; four charts, deterministic recommendation (lowest mean MAE across horizons, tie-break latency→size), `REPORT.md` (hand-built Markdown table, no `tabulate` dependency) and `results.json` (numpy scalars coerced to native JSON numbers). Missing artifacts raise `FileNotFoundError`/exit non-zero before anything is written.
+- **Deps** — `matplotlib>=3.8.0` and `pyarrow>=16.0.0` added to `ai-service/requirements-experiments.txt` only.
+- **Cost note** — SARIMAX `forecast_grid` is O(n²) in the test length (one `extend` per origin). This is the accepted consequence of the fit-once/no-refit decision; acceptable for an offline experiment, and the report never pays it (it reads artifacts).
+- **Verification status** — all files pass `python -m py_compile`. Per the project rule (see memory: never run training files; print the command), the benchmark run and `pytest` were **not executed here**; the user must run the commands in the Verification section to complete the Matrix Test Audit.
 
 ## Design Notes
 
@@ -122,5 +136,34 @@ context: []
 ## Spec Change Log
 
 - 2026-10-23 — Folded three build decisions into the frozen Intent/Boundaries during `bmad-build` step-01: SARIMAX uses fit-once + per-origin `append`/`extend` with fixed params (no refit); predictions artifact is Parquet with all 24 horizons (`pyarrow` dependency); report charts use a headless matplotlib `Agg` backend (`matplotlib` + `pyarrow` added to `requirements-experiments.txt`). Status `backlog` → `draft`.
+- 2026-10-23 (step-02 plan) — Resolved one Open Question discovered during investigation: future `air_temperature` for XGBoost/SARIMAX multi-horizon uses the **actual observed future value** (perfect-forecast covariate); only `meter_reading` is origin-restricted. Scope gate: spec is ~3.8k tokens (over the 1600 guideline); product owner chose to **keep the full spec** as one cohesive story rather than split the harness/report seam.
 
 ## Review Triage Log
+
+### Review Findings (code review 2026-10-23)
+
+Adversarial review (4 layers: blind-hunter, edge-case-hunter, verification-gap, acceptance-auditor) against baseline `f885e757`. 9 survivors (3 decision-needed, 4 patch, 2 defer), 11 rejected.
+
+- [x] [Review][Decision → resolved: keep always-on] `execute_benchmark` has no hour-1-only path — it always runs the heavy per-horizon scorer (double-fit) and hard-requires `pyarrow`. **Resolved 2026-10-23:** PO chose to keep always-on (offline experiment; cost accepted); no code change. [run_benchmark.py:96-112]
+- [x] [Review][Decision → resolved: patch] Near-tie recommendation epsilon not implemented — matrix "Recommendation tie/near-tie" calls for a documented epsilon band. **Resolved 2026-10-23:** implemented a 1%-of-best-mean-MAE near-tie band (`RECOMMENDATION_EPSILON_FRAC`), decided on latency→size, rationale updated. [report.py:compute_recommendation]
+- [x] [Review][Decision → resolved: patch] Generated artifacts not git-ignored. **Resolved 2026-10-23:** added `ai-service/experiments/benchmark/.gitignore` for all generated artifacts (results.csv, results_by_horizon.csv, predictions.parquet, results.json, REPORT.md, chart_*.png). [ai-service/experiments/benchmark/.gitignore]
+- [x] [Review][Patch] No test asserts `execute_benchmark` writes `results_by_horizon.csv` + `predictions.parquet` at the default sibling paths with the right schema — **fixed:** added `test_execute_benchmark_writes_horizon_and_prediction_artifacts` [ai-service/tests/test_benchmark.py]
+- [x] [Review][Patch] No test reconciles the horizon-1 **aggregate** MAE/RMSE with the hour-1 path — **fixed:** added `test_horizon_one_aggregate_reconciles_with_hour_one` (aligned row set 1..n-1, per-model tolerances) [ai-service/tests/test_benchmark_horizon.py]
+- [x] [Review][Patch] `--horizon` unvalidated — **fixed:** up-front `1 <= horizon <= 24` guard in `execute_benchmark` (raises before writing `results.csv`); regression test `test_execute_benchmark_rejects_out_of_range_horizon` [ai-service/experiments/benchmark/run_benchmark.py]
+- [x] [Review][Patch] `score_grid` NaN mask ignored actuals — **fixed:** mask now `~np.isnan(preds) & ~np.isnan(acts)` [ai-service/experiments/benchmark/benchmark.py:185]
+- [x] [Review][Patch] Native multi-step no-leakage tested only at horizon 1 — **fixed:** added parametrized `test_native_multistep_no_leakage` (SARIMAX+LSTM; a shocked future actual leaves `grid[p]` unchanged) [ai-service/tests/test_benchmark_horizon.py]
+- [x] [Review][Defer] Runtime acceptance criteria marked `[x]` but not executed — benchmark run + `pytest` were not run (project rule: user runs training/benchmark). Data-dependent ACs (4×24 finite rows, reconciliation on real data, 4 PNGs rendering) unverified [spec Verification] — deferred: settled by the user running the three Verification commands.
+- [x] [Review][Defer] `compute_recommendation` not robust to empty/mismatched present artifacts (empty `by_horizon` → `iloc[0]` IndexError; a model in `by_horizon` absent from `results.csv` → left-join NaN → `int(NaN)` ValueError), and charts are rendered before the crash (orphan PNGs) [report.py:225-230, 335-349] — deferred: low likelihood (both artifacts come from one harness run; `run_report` already exits non-zero), optional hardening.
+
+**Rejected:**
+- `false` — XGBoost `forecast_grid` pre-fit "AttributeError": `self.model` is instantiated in `__init__` (never None); an unfitted call raises sklearn `NotFittedError` (clear), not AttributeError, and `run_horizon_scoring` always fits first (unreachable).
+- `low` — actual-vs-predicted chart "silently empty" with no horizon-1 rows: `score_grid` always emits `h=1` first; empty only if the test span ≤1 row, impossible for a 20% split of ~14k rows.
+- `low` — `results_by_horizon.csv` "not guaranteed 24 rows": all 24 emitted on any span ≥25 rows; the fixture test already asserts 1..24, and the span-edge matrix row explicitly tolerates truncation on short spans.
+- `low` — `load_artifacts` no schema validation: artifacts come from the same harness with a fixed schema; a foreign CSV raises a KeyError that `run_report` already converts to a non-zero exit. Guard adds complexity for an unreachable case.
+- `reject` — recommendation "weighing accuracy vs latency/size" wording oversells: fix edits the frozen spec; the code matches the Design Note ("lowest error + documented latency/size tie-break").
+- `reject` — reconciliation tolerance "only in the test, not the spec": fix edits the spec.
+- `reject` — frozen-after-approval section edited: sanctioned by a Spec Change Log entry (PO renegotiation 2026-10-23); not a defect.
+- `reject` — stale "three charts" acceptance criterion: fix edits the spec; and not stale — AC lines 103-104 are the original FR21 three-chart criterion, line 102 adds the fourth chart.
+- `reject` — `results.json` schema undocumented: fix edits the spec; top-level keys are already pinned by `test_results_json_schema_and_recommendation`.
+- `low` — `generate_report` writes PNGs before REPORT.md/json (orphan charts on render failure): folded into the `compute_recommendation` robustness defer; only reachable via malformed present artifacts.
+- `low` — `test_xgboost_recursion_uses_own_prediction` predicts via bare numpy not the DataFrame path: numerically identical, the assertion still proves the recursion; cosmetic test-fidelity nit.

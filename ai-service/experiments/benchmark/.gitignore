@@ -1,0 +1,8 @@
+# Generated benchmark + report artifacts (Stories 4.1–4.4).
+# Regenerate with `python -m experiments.benchmark.run_benchmark` and `... run_report`.
+results.csv
+results_by_horizon.csv
+predictions.parquet
+results.json
+REPORT.md
+chart_*.png

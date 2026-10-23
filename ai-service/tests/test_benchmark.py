@@ -14,7 +14,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from experiments.benchmark.benchmark import BENCHMARK_COLUMNS, run_scoring, score_model
+from experiments.benchmark.benchmark import (
+    BENCHMARK_COLUMNS,
+    HORIZON_COLUMNS,
+    PREDICTION_COLUMNS,
+    run_scoring,
+    score_model,
+)
 from experiments.benchmark.models import (
     BaseForecaster,
     SeasonalNaiveForecaster,
@@ -94,6 +100,44 @@ def test_execute_benchmark_writes_results_csv(tmp_path):
     # Returned frame matches what was persisted
     assert list(results_df.columns) == list(written_df.columns)
     assert len(results_df) == len(written_df)
+
+
+def test_execute_benchmark_writes_horizon_and_prediction_artifacts(tmp_path):
+    """
+    execute_benchmark also writes results_by_horizon.csv and predictions.parquet as siblings
+    of results.csv (the inputs Story 4.4's report reads), each with the documented schema and
+    all four models, finite.
+    """
+    fixture_path = Path(__file__).resolve().parent / "fixtures" / "office_building_sample.csv"
+    output_file = tmp_path / "results.csv"
+
+    execute_benchmark(data_path=fixture_path, output_path=output_file)
+
+    by_horizon_file = tmp_path / "results_by_horizon.csv"
+    predictions_file = tmp_path / "predictions.parquet"
+    assert by_horizon_file.exists(), "execute_benchmark must write results_by_horizon.csv"
+    assert predictions_file.exists(), "execute_benchmark must write predictions.parquet"
+
+    by_horizon = pd.read_csv(by_horizon_file)
+    assert list(by_horizon.columns) == HORIZON_COLUMNS
+    assert set(by_horizon["model"]) == {"seasonal_naive", "xgboost", "sarimax", "lstm"}
+    assert by_horizon[["mae_kwh", "rmse_kwh"]].notna().all().all(), "per-horizon metrics must be finite"
+
+    predictions = pd.read_parquet(predictions_file)
+    assert list(predictions.columns) == PREDICTION_COLUMNS
+    assert set(predictions["model"]) == {"seasonal_naive", "xgboost", "sarimax", "lstm"}
+    assert predictions[["actual", "prediction"]].notna().all().all()
+
+
+def test_execute_benchmark_rejects_out_of_range_horizon(tmp_path):
+    """An out-of-range --horizon is rejected before any artifact is written."""
+    fixture_path = Path(__file__).resolve().parent / "fixtures" / "office_building_sample.csv"
+    output_file = tmp_path / "results.csv"
+
+    for bad_horizon in (0, -3, 25):
+        with pytest.raises(ValueError):
+            execute_benchmark(data_path=fixture_path, output_path=output_file, horizon=bad_horizon)
+        assert not output_file.exists(), "No results.csv may be written when horizon is invalid"
 
 
 def test_seasonal_naive_predictions_equal_lag_24h(sample_partitions):
