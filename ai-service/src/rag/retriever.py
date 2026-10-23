@@ -12,19 +12,33 @@ import chromadb
 from src.rag.ingest import (
     CHROMA_PERSIST_DIR,
     COLLECTION_NAME,
+    KNOWLEDGE_BASE_DIR,
     get_embedding_model,
 )
 
 def get_chroma_collection(persist_dir: Path = None):
     """Retrieves or connects to the persistent Chroma collection."""
-    path = str(persist_dir or CHROMA_PERSIST_DIR)
+    target_path = Path(persist_dir or CHROMA_PERSIST_DIR)
 
-    if not Path(path).exists():
-        return None
+    # Auto-initialize if target is the default CHROMA_PERSIST_DIR and it doesn't exist yet
+    if not target_path.exists():
+        if (persist_dir is None or target_path.resolve() == CHROMA_PERSIST_DIR.resolve()) and KNOWLEDGE_BASE_DIR.exists():
+            from src.rag.ingest import run_ingest
+            run_ingest(kb_dir=KNOWLEDGE_BASE_DIR, persist_dir=target_path)
+        else:
+            return None
 
     try:
-        client = chromadb.PersistentClient(path=path)
-        collection = client.get_collection(name=COLLECTION_NAME)
+        client = chromadb.PersistentClient(path=str(target_path))
+        try:
+            collection = client.get_collection(name=COLLECTION_NAME)
+        except Exception:
+            if (persist_dir is None or target_path.resolve() == CHROMA_PERSIST_DIR.resolve()) and KNOWLEDGE_BASE_DIR.exists():
+                from src.rag.ingest import run_ingest
+                run_ingest(kb_dir=KNOWLEDGE_BASE_DIR, persist_dir=target_path)
+                collection = client.get_collection(name=COLLECTION_NAME)
+            else:
+                return None
         return collection
     except Exception as err:
         print(f"[Warning] Chroma collection '{COLLECTION_NAME}' not found or unreachable: {err}")

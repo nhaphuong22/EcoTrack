@@ -19,7 +19,8 @@
     "db:generate": "npm run prisma:generate --prefix backend",
     "test:ai": "pytest ai-service",
     "test:backend": "npm test --prefix backend",
-    "test": "pytest ai-service && npm test --prefix backend"
+    "test": "pytest ai-service && npm test --prefix backend",
+    "check:ci": "powershell -ExecutionPolicy Bypass -File ./check_ci.ps1"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

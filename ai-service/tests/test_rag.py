@@ -62,7 +62,11 @@ class TestKnowledgeBaseRAG:
 
     def test_ac4_vietnamese_tariff_retrieval(self):
         """AC4: Querying 'giá điện giờ cao điểm' with k=3 returns at least one chunk from the tariff document."""
-        # Ensure base collection exists
+        # Ensure base collection exists and has documents
+        collection = get_chroma_collection(persist_dir=CHROMA_PERSIST_DIR)
+        if collection is None or collection.count() == 0:
+            run_ingest(kb_dir=KNOWLEDGE_BASE_DIR, persist_dir=CHROMA_PERSIST_DIR)
+
         query = "giá điện giờ cao điểm"
         results = query_knowledge(query, k=3, persist_dir=CHROMA_PERSIST_DIR)
 
