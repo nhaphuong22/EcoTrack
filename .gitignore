@@ -45,6 +45,7 @@ data/raw/
 .agent/
 .agents/
 .claude/
+update.md
 _bmad-output/test-artifacts/
 _bmad-output/party-mode/
 # 6. Folder tai lieu & Logging
