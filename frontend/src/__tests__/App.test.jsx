@@ -9,6 +9,8 @@ vi.mock('../services/api', () => ({
   fetchTimeSeries: vi.fn(),
   fetchAnomalies: vi.fn(),
   fetchForecast: vi.fn(),
+  fetchZones: vi.fn(),
+  fetchSystemHealth: vi.fn(),
   sendCopilotMessage: vi.fn(),
 }));
 
@@ -32,6 +34,28 @@ describe('App - Story 1.7 Copilot & Anomaly Context Integration', () => {
     });
     api.fetchTimeSeries.mockResolvedValue({ data: [] });
     api.fetchForecast.mockResolvedValue({ predictions: [] });
+    api.fetchZones.mockResolvedValue({
+      building_id: 'office_tower_01',
+      total: 1,
+      zones: [
+        {
+          id: 'z1',
+          name: 'Phòng 101',
+          floor: 1,
+          latest_reading: {
+            outdoor_temperature_c: 24.5,
+            meter_reading_kwh: 45.2,
+            relative_humidity_pct: 60,
+          },
+        },
+      ],
+    });
+    api.fetchSystemHealth.mockResolvedValue({
+      status: 'healthy',
+      services: { database: 'connected', ai_service: 'connected' },
+      models: { forecast: 'loaded', anomaly: 'loaded' },
+      copilot_engine: 'google_genai',
+    });
     api.sendCopilotMessage.mockResolvedValue({
       reply: 'Chẩn đoán: Tải tăng đột biến tại tầng 3.',
       tools_used: [],
@@ -243,5 +267,46 @@ describe('App - Story 1.7 Copilot & Anomaly Context Integration', () => {
     });
     // Sent message is still preserved in history
     expect(screen.getByText('Kiểm tra hệ thống')).toBeInTheDocument();
+  });
+
+  it('tab navigation switches to FloorPlan view and triggers Copilot for zone', async () => {
+    api.fetchAnomalies.mockResolvedValue([]);
+
+    render(<App />);
+
+    // Click tab "Sơ đồ Mặt bằng 2D"
+    const floorplanTab = document.getElementById('tab-floorplan');
+    expect(floorplanTab).toBeInTheDocument();
+    fireEvent.click(floorplanTab);
+
+    // FloorPlan renders
+    await waitFor(() => {
+      expect(screen.getByText('Sơ đồ Mặt bằng Thời gian thực')).toBeInTheDocument();
+      expect(screen.getByText('Phòng 101')).toBeInTheDocument();
+    });
+
+    // Click on zone 101 to open modal
+    const roomElements = screen.getAllByRole('button');
+    const z1Room = roomElements.find((el) => el.getAttribute('aria-label')?.includes('Phòng 101'));
+    expect(z1Room).toBeDefined();
+    fireEvent.click(z1Room);
+
+    // Click Ask Copilot
+    const askCopilotBtn = document.getElementById('zone-ask-copilot-btn');
+    expect(askCopilotBtn).toBeInTheDocument();
+    fireEvent.click(askCopilotBtn);
+
+    // Copilot message sent with zone context
+    await waitFor(() => {
+      expect(api.sendCopilotMessage).toHaveBeenCalledWith(
+        expect.stringContaining('Phòng 101'),
+        'office_tower_01',
+        []
+      );
+    });
+
+    // Drawer opens
+    expect(document.querySelector('.bg-black\\/40')).toBeInTheDocument();
+    expect(document.querySelector('aside')).toHaveClass('translate-x-0');
   });
 });

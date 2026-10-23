@@ -31,3 +31,12 @@ export const sendCopilotMessage = (message, buildingId = 'office_tower_01', hist
     building_id: buildingId,
     history,
   }).then(r => r.data);
+
+/** GET /api/v1/buildings/:id/zones */
+export const fetchZones = (buildingId = 'office_tower_01') =>
+  apiClient.get(`/api/v1/buildings/${buildingId}/zones`).then(r => r.data);
+
+/** GET /health - Real system status inspection */
+export const fetchSystemHealth = () =>
+  apiClient.get('/health').then(r => r.data);
+

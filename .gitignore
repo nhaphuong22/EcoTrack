@@ -22,6 +22,8 @@ env/
 *.db-wal
 *.db-shm
 *.db-journal
+chroma_db/
+**/chroma_db/
 
 # 3. Frontend & Node.js
 node_modules/

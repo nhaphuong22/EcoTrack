@@ -45,14 +45,14 @@ development_status:
   1-7-open-the-copilot-with-the-anomaly-s-context: done
   epic-1-retrospective: optional
 
-  epic-2: backlog
-  2-1-push-live-readings-to-clients: backlog
-  2-2-see-the-building-live-on-a-floor-plan: backlog
-  2-3-show-real-system-status: backlog
+  epic-2: done
+  2-1-push-live-readings-to-clients: done
+  2-2-see-the-building-live-on-a-floor-plan: done
+  2-3-show-real-system-status: done
   epic-2-retrospective: optional
 
-  epic-3: backlog
-  3-1-build-a-searchable-energy-knowledge-base: backlog
+  epic-3: in-progress
+  3-1-build-a-searchable-energy-knowledge-base: done
   3-2-answer-knowledge-questions-with-cited-sources: backlog
   3-3-keep-context-across-turns: backlog
   3-4-stream-copilot-answers-from-the-ai-service: backlog
