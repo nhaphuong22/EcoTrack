@@ -1,22 +1,31 @@
 import { useState, useCallback } from 'react';
-import { Bot, AlertCircle } from 'lucide-react';
+import { Bot, AlertCircle, LayoutDashboard, Map } from 'lucide-react';
 import Header from './components/layout/Header';
 import MetricCards from './components/dashboard/MetricCards';
 import ForecastChart from './components/dashboard/ForecastChart';
 import AnomalyTable from './components/dashboard/AnomalyTable';
+import FloorPlan from './components/dashboard/FloorPlan';
+import SystemStatus from './components/dashboard/SystemStatus';
 import CopilotDrawer from './components/copilot/CopilotDrawer';
 import { useEnergyData } from './hooks/useEnergyData';
 import { useCopilot } from './hooks/useCopilot';
-import { buildAnomalyPrompt } from './lib/copilotPrompt';
+import { buildAnomalyPrompt, buildZonePrompt } from './lib/copilotPrompt';
 import { API_BASE_URL } from './services/api';
 
 export default function App() {
   const { metrics, timeSeries, anomalies, loading, error, refetch } = useEnergyData(168);
   const { messages, isLoading: copilotLoading, error: copilotError, sendMessage, clearHistory } = useCopilot();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'floorplan'
 
   const handleAskCopilot = useCallback((anomaly) => {
     const prompt = buildAnomalyPrompt(anomaly);
+    sendMessage(prompt);
+    setDrawerOpen(true);
+  }, [sendMessage]);
+
+  const handleAskCopilotZone = useCallback((zone) => {
+    const prompt = buildZonePrompt(zone);
     sendMessage(prompt);
     setDrawerOpen(true);
   }, [sendMessage]);
@@ -26,6 +35,39 @@ export default function App() {
       <Header onRefresh={refetch} loading={loading} />
 
       <main className="mx-auto max-w-screen-2xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+        {/* Navigation Tabs */}
+        <div className="flex items-center gap-2 border-b border-slate-800/80 pb-3">
+          <button
+            id="tab-dashboard"
+            onClick={() => setActiveTab('dashboard')}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+              activeTab === 'dashboard'
+                ? 'bg-slate-800 text-emerald-400 border border-slate-700 shadow-sm'
+                : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+            }`}
+          >
+            <LayoutDashboard size={16} />
+            <span>Tổng quan Năng lượng</span>
+          </button>
+
+          <button
+            id="tab-floorplan"
+            onClick={() => setActiveTab('floorplan')}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+              activeTab === 'floorplan'
+                ? 'bg-slate-800 text-emerald-400 border border-slate-700 shadow-sm'
+                : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+            }`}
+          >
+            <Map size={16} />
+            <span>Sơ đồ Mặt bằng 2D</span>
+            <span className="flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Live
+            </span>
+          </button>
+        </div>
+
         {/* Error banner */}
         {error && (
           <div className="flex items-center gap-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-400">
@@ -37,41 +79,31 @@ export default function App() {
           </div>
         )}
 
-        {/* KPI Metric Cards */}
-        <MetricCards metrics={metrics} />
+        {activeTab === 'dashboard' ? (
+          <>
+            {/* KPI Metric Cards */}
+            <MetricCards metrics={metrics} />
 
-        {/* Time-series forecast chart */}
-        <ForecastChart timeSeries={timeSeries} loading={loading} />
+            {/* Time-series forecast chart */}
+            <ForecastChart timeSeries={timeSeries} loading={loading} />
 
-        {/* Bottom: Anomaly triage board */}
-        <div className="grid gap-6 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <AnomalyTable
-              anomalies={anomalies}
-              loading={loading}
-              onAskCopilot={handleAskCopilot}
-            />
-          </div>
-
-          {/* Right: System status */}
-          <div className="rounded-2xl border border-slate-700 bg-slate-800/60 p-5 space-y-4 backdrop-blur-sm">
-            <h3 className="font-semibold text-white">Trạng thái hệ thống</h3>
-            {[
-              { label: 'XGBoost Forecaster', status: 'Đang chạy', ok: true },
-              { label: 'Isolation Forest Detector', status: 'Đang chạy', ok: true },
-              { label: 'LLM Copilot Agent', status: 'Sẵn sàng', ok: true },
-              { label: 'Data Pipeline (BDG2)', status: 'Đồng bộ', ok: true },
-            ].map(s => (
-              <div key={s.label} className="flex items-center justify-between text-sm">
-                <span className="text-slate-400">{s.label}</span>
-                <span className={`flex items-center gap-1.5 font-medium ${s.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  <span className={`h-2 w-2 rounded-full ${s.ok ? 'bg-emerald-400' : 'bg-rose-400'} animate-pulse`} />
-                  {s.status}
-                </span>
+            {/* Bottom: Anomaly triage board */}
+            <div className="grid gap-6 lg:grid-cols-3">
+              <div className="lg:col-span-2">
+                <AnomalyTable
+                  anomalies={anomalies}
+                  loading={loading}
+                  onAskCopilot={handleAskCopilot}
+                />
               </div>
-            ))}
-          </div>
-        </div>
+
+              {/* Right: Real System status (Story 2.3, FR45) */}
+              <SystemStatus />
+            </div>
+          </>
+        ) : (
+          <FloorPlan onAskCopilot={handleAskCopilotZone} />
+        )}
       </main>
 
       {/* Floating Copilot button */}

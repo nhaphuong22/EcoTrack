@@ -54,6 +54,10 @@ jobs:
           # Additional warnings check with exit-zero (does not fail build for style)
           flake8 src --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
+      - name: Index Energy Knowledge Base (RAG)
+        run: |
+          python -m src.rag.ingest
+
       - name: Run Smoke & Unit Tests
         env:
           PYTHONPATH: .

@@ -9,6 +9,8 @@ const forecastRouter = require('./routes/forecast');
 const anomaliesRouter = require('./routes/anomalies');
 const copilotRouter = require('./routes/copilot');
 const ingestRouter = require('./routes/ingest');
+const streamRouter = require('./routes/stream');
+const healthRouter = require('./routes/health');
 
 const app = express();
 
@@ -25,9 +27,8 @@ app.get('/', (req, res) => {
   });
 });
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'healthy', timestamp: new Date().toISOString() });
-});
+app.use('/health', healthRouter);
+app.use('/api/v1/health', healthRouter);
 
 // Mount domain routes under /api/v1
 app.use('/api/v1/buildings', buildingsRouter);
@@ -36,6 +37,7 @@ app.use('/api/v1/forecast', forecastRouter);
 app.use('/api/v1/anomalies', anomaliesRouter);
 app.use('/api/v1/copilot', copilotRouter);
 app.use('/api/v1/ingest', ingestRouter);
+app.use('/api/v1/stream', streamRouter);
 
 // Global Error Handler
 app.use(errorHandler);

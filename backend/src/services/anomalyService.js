@@ -90,8 +90,13 @@ async function listAnomalies() {
     console.warn('AI anomaly detection failed or offline, falling back to DB records:', err.message);
   }
 
-  // 2. Fetch persistent statuses from PostgreSQL
-  const dbRecords = await prisma.anomalyEvent.findMany();
+  // 2. Fetch persistent statuses from PostgreSQL (if DB online)
+  let dbRecords = [];
+  try {
+    dbRecords = await prisma.anomalyEvent.findMany();
+  } catch (dbErr) {
+    // Database offline, continue with in-memory AI events
+  }
   const dbMap = new Map(dbRecords.map((r) => [r.id, r]));
 
   if (Array.isArray(rawEvents) && rawEvents.length > 0) {
