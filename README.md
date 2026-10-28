@@ -4,61 +4,88 @@
 
 ---
 
-## 🚀 Khởi chạy nhanh (5 phút)
+## 🚀 Hướng Dẫn Cài Đặt & Khởi Chạy (Từ A - Z)
 
-### Yêu cầu hệ thống
-- Docker Desktop ≥ 24.x + Docker Compose ≥ 2.24
-- (Tuỳ chọn) Google Gemini API Key hoặc OpenAI API Key để kích hoạt Copilot Agent
+Dự án được tối ưu để thiết lập môi trường, chạy migration và khởi chạy đồng thời toàn bộ hệ thống (**AI Service FastAPI**, **Backend Express Gateway**, và **Frontend React Vite**) với các lệnh đơn giản ngay từ thư mục gốc.
 
-### Bước 1: Clone và cấu hình môi trường
-```bash
-git clone https://github.com/nhaphuong22/EcoTrack.git
-cd EcoTrack
-
-# Tạo file .env cho backend từ mẫu
-cp backend/.env.example backend/.env
-
-# (Tuỳ chọn) Điền API Key vào backend/.env
-# GEMINI_API_KEY=your-gemini-api-key
-# OPENAI_API_KEY=your-openai-api-key
-```
-
-### Bước 2: Khởi chạy toàn bộ hệ thống
-```bash
-docker-compose up --build
-```
-
-| Service          | URL                           |
-| :--------------- | :---------------------------- |
-| 🔌 Backend API   | http://localhost:8000          |
-| 📚 Swagger Docs  | http://localhost:8000/docs     |
-| 💻 Dashboard UI  | http://localhost:3000          |
+### 📋 Yêu cầu môi trường
+- **Docker Desktop** (đang bật để chạy CSDL PostgreSQL)
+- **Node.js** (≥ 18.x) & **Python** (≥ 3.10)
 
 ---
 
-## 🛠️ Phát triển local (không Docker)
+### Bước 1: Cài đặt thư viện (Chỉ thực hiện lần đầu)
 
-### Backend (Python FastAPI)
+Mở terminal tại thư mục gốc `EcoTrack` và chạy 1 lệnh duy nhất:
+
 ```bash
-cd backend
-
-# Tạo và kích hoạt môi trường ảo Python
-python -m venv venv
-# Kích hoạt trên Windows (PowerShell): .\venv\Scripts\Activate.ps1
-# Kích hoạt trên Windows (CMD):        venv\Scripts\activate.bat
-# Kích hoạt trên Linux / macOS:        source venv/bin/activate
-
-pip install -r requirements.txt
-cp .env.example .env          # Điền API key nếu có
-uvicorn src.main:app --reload --port 8000
+npm run install:all
 ```
 
-### Frontend (React + Vite)
+*(Lệnh này tự động cài đặt tuần tự: thư viện Express/Prisma cho `backend/`, thư viện React/Tailwind cho `frontend/`, và gói Python Machine Learning từ `ai-service/requirements.txt` cùng `ai-service/requirements-experiments.txt`; file thứ hai chứa PyTorch bản CPU và statsmodels cho benchmark, không được cài vào Docker image)*.
+
+---
+
+### Bước 2: Khởi động CSDL & Chạy Migrations
+
+1. **Khởi động PostgreSQL trong Docker**:
+   ```bash
+   npm run db:up
+   ```
+   *(Container `ecotrack_postgres` sẽ khởi chạy ngầm tại cổng `5432`)*.
+
+2. **Chạy Prisma Migration**:
+   ```bash
+   npm run db:migrate
+   ```
+   *(Áp dụng các file SQL migration chính thức vào PostgreSQL. Bạn cũng có thể dùng `npm run db:push` để đồng bộ nhanh schema)*.
+
+3. *(Tùy chọn)* **Mở giao diện Web xem dữ liệu (Prisma Studio)**:
+   ```bash
+   npm run db:studio
+   ```
+   👉 Truy cập **`http://localhost:5555`** để xem và chỉnh sửa dữ liệu dạng bảng trực quan.
+
+---
+
+### Bước 3: Khởi chạy dự án (Run Dev)
+
+Tại thư mục gốc `EcoTrack`, chạy:
+
 ```bash
-cd frontend
-npm install
 npm run dev
-# → http://localhost:3000
+```
+
+#### ⚡ Lệnh này sẽ chạy trực tiếp 3 dịch vụ bằng dòng lệnh (không dùng docker):
+- 🟣 **`[AI]`**: Pure Python FastAPI tại `http://localhost:8000` (XGBoost, Isolation Forest & Copilot).
+- 🟢 **`[BACKEND]`**: Express.js Gateway tại `http://localhost:5000` (Prisma ORM, CRUD, In-memory cache).
+- 🔵 **`[FRONTEND]`**: React Vite tại `http://localhost:3000` (Hot-Reload tức thì khi sửa code).
+
+| Dịch vụ | URL / Địa chỉ | Chức năng |
+| :--- | :--- | :--- |
+| 💻 **Dashboard UI** | **http://localhost:3000** | Giao diện giám sát năng lượng, biểu đồ & AI Copilot |
+| 🔌 **Backend API** | **http://localhost:5000** | Express.js API Gateway, CRUD, Cache TTL & Proxy |
+| 🧠 **AI Service** | **http://localhost:8000** | Pure Python FastAPI — ML Inference & ReAct Copilot |
+| 📚 **AI Swagger Docs** | **http://localhost:8000/docs** | Swagger Docs tài liệu kiểm thử AI Engine |
+| 🗄️ **PostgreSQL DB** | `localhost:5432` | DB: `ecotrack` \| User: `ecotrack` \| Pass: `ecotrack_secret` |
+| 🖥️ **Prisma Studio** | `http://localhost:5555` | Giao diện quản lý CSDL |
+
+> 💡 **Cách dừng hệ thống:** Nhấn **`Ctrl + C`** tại cửa sổ Terminal đang chạy.
+> 
+> 🐳 **Muốn chạy kèm tự động bật Docker DB:** Dùng lệnh `npm run dev:docker`.  
+> 🐳 **Muốn chạy Full 4 Containers qua Docker Compose:** Dùng lệnh `docker compose up`.
+
+---
+
+### Bước 4: Chạy kiểm thử tự động (Automated Testing)
+
+```bash
+# Chạy toàn bộ 51 tests (Pytest + Vitest)
+npm test
+
+# Hoặc kiểm thử riêng từng phần:
+npm run test:backend   # 20 tests Vitest (Express Gateway)
+npm run test:ai        # 31 tests Pytest (AI ML Engine)
 ```
 
 ---
@@ -67,22 +94,27 @@ npm run dev
 
 ```
 EcoTrack Monorepo
-├── backend/                    # FastAPI · XGBoost · Isolation Forest · LLM Agent
+├── backend/                    # [MỚI] Node.js · Express · Prisma · API Gateway (Port 5000)
+│   ├── prisma/schema.prisma    # PostgreSQL Schema & Indexes
 │   ├── src/
-│   │   ├── data_pipeline/      # Building Data Genome 2 loader + Feature Engineering
-│   │   ├── models/
-│   │   │   ├── forecaster_xgboost/        # Dự báo phụ tải 24h
-│   │   │   └── anomaly_isolation_forest/  # Phát hiện bất thường
-│   │   ├── agent/              # LLM Copilot (ReAct · Tool Calling)
-│   │   └── api/                # FastAPI routers + Pydantic schemas
-│   └── configs/                # model_config.yaml · agent_config.yaml
+│   │   ├── routes/             # buildings, energy, forecast, anomalies, copilot
+│   │   ├── services/           # buildingService, anomalyService
+│   │   ├── utils/              # aiClient (Proxy to FastAPI), InMemoryTTLCache
+│   │   └── server.js           # Express App Entrypoint
+│   └── tests/                  # Vitest + Supertest Gateway Tests
 │
-└── frontend/                   # React 18 · Vite · TailwindCSS · Recharts
+├── ai-service/                 # [CHUYỂN ĐỔI] Pure Python · FastAPI (Port 8000)
+│   ├── src/
+│   │   ├── data_pipeline/      # BDG2 data loader, Feature Engineering, Streaming worker
+│   │   ├── models/             # XGBoost Forecaster (24h) & Isolation Forest Anomaly
+│   │   ├── agent/              # ReAct Copilot (Gemini / OpenAI Tools)
+│   │   └── api/routers/        # /internal endpoints + /api/v1 compatible routes
+│   └── tests/                  # Pytest Unit & Integration Tests (42 tests)
+│
+└── frontend/                   # React 18 · Vite · TailwindCSS · Recharts (Port 3000)
     └── src/
-        ├── components/dashboard/  # MetricCards · ForecastChart · AnomalyTable
-        ├── components/copilot/    # CopilotDrawer · ChatMessage · QuickPrompts
-        ├── hooks/                 # useEnergyData · useCopilot
-        └── services/api.js        # Axios client
+        ├── components/         # MetricCards · ForecastChart · AnomalyTable · CopilotDrawer
+        └── services/api.js     # Axios client kết nối Express Backend (:5000)
 ```
 
 ---
@@ -126,10 +158,27 @@ EcoTrack Monorepo
 
 ---
 
-## 📄 Tài liệu dự án
+## 🛠️ Công cụ hỗ trợ phát triển (Developer Tools)
 
-| Tài liệu | Đường dẫn |
-| :--- | :--- |
-| 📋 PRD | `_bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/prd.md` |
-| 🏛️ Architecture Spine | `_bmad-output/planning-artifacts/architecture/architecture-EcoTrack-2026-09-23/ARCHITECTURE-SPINE.md` |
-| 🔧 Technical Addendum | `_bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/addendum.md` |
+- **Quản lý CSDL trực quan trên Web (Prisma Studio):**
+  ```bash
+  npm run db:studio
+  ```
+- **Chạy Stream Telemetry Worker (Mô phỏng IoT telemetry):**
+  ```bash
+  python ai-service/src/data_pipeline/stream_worker.py
+  ```
+- **Chạy kiểm thử toàn diện:**
+  ```bash
+  npm test
+  ```
+
+---
+
+## 📄 Tài liệu thiết kế dự án
+
+| Tài liệu | Đường dẫn | Mô tả |
+| :--- | :--- | :--- |
+| 📋 **PRD** | `_bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/prd.md` | Tài liệu đặc tả yêu cầu sản phẩm |
+| 🏛️ **Architecture Spine** | `_bmad-output/planning-artifacts/architecture/architecture-EcoTrack-2026-09-23/ARCHITECTURE-SPINE.md` | Thiết kế kiến trúc kỹ thuật hệ thống |
+| 🔧 **Technical Addendum** | `_bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/addendum.md` | Phụ lục kỹ thuật và chuẩn tích hợp |

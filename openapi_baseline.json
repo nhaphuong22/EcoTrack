@@ -1,0 +1,1190 @@
+﻿{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "EcoTrack - Building Energy Management & Copilot API",
+    "description": "Backend API for building energy forecasting (XGBoost), anomaly detection (Isolation Forest), and conversational AI Copilot.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/v1/buildings": {
+      "get": {
+        "tags": [
+          "Buildings & Telemetry"
+        ],
+        "summary": "Get list of all monitored buildings",
+        "description": "Returns the complete list of monitored buildings.\nAutomatically populates benchmark buildings on first startup if empty.",
+        "operationId": "get_buildings_api_v1_buildings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildingListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Buildings & Telemetry"
+        ],
+        "summary": "Create a new building",
+        "description": "Registers a new building profile in the database.",
+        "operationId": "create_building_api_v1_buildings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildingCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/buildings/{building_id}": {
+      "get": {
+        "tags": [
+          "Buildings & Telemetry"
+        ],
+        "summary": "Get building by ID",
+        "description": "Retrieves metadata for a specific building.",
+        "operationId": "get_building_by_id_api_v1_buildings__building_id__get",
+        "parameters": [
+          {
+            "name": "building_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Building Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/buildings/{building_id}/history": {
+      "get": {
+        "tags": [
+          "Buildings & Telemetry"
+        ],
+        "summary": "Get historical energy consumption",
+        "description": "Retrieves sequential time-series meter telemetry for the requested building.\nReturns chronologically ordered points (oldest to newest) suitable for charts.",
+        "operationId": "get_building_history_api_v1_buildings__building_id__history_get",
+        "parameters": [
+          {
+            "name": "building_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Building Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "description": "Max readings to retrieve (default: 168h = 7 days)",
+              "default": 168,
+              "title": "Limit"
+            },
+            "description": "Max readings to retrieve (default: 168h = 7 days)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildingHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/energy/timeseries": {
+      "get": {
+        "tags": [
+          "Energy Telemetry"
+        ],
+        "summary": "Get historical energy timeseries",
+        "description": "Returns time-series power consumption and ambient weather telemetry.\nCached for 60 seconds to ensure high performance and low latency.",
+        "operationId": "get_timeseries_api_v1_energy_timeseries_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Number of past hourly points (default: 168 = 7 days)",
+              "default": 168,
+              "title": "Limit"
+            },
+            "description": "Number of past hourly points (default: 168 = 7 days)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeSeriesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/energy/metrics": {
+      "get": {
+        "tags": [
+          "Energy Telemetry"
+        ],
+        "summary": "Get key building energy KPIs",
+        "description": "Returns high-level summary KPIs for energy, peak demand, and anomaly waste.\nCached for 60 seconds to ensure fast dashboard load times.",
+        "operationId": "get_metrics_api_v1_energy_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricSummaryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/energy/cache/stats": {
+      "get": {
+        "tags": [
+          "Energy Telemetry"
+        ],
+        "summary": "Get TTL cache diagnostic statistics",
+        "description": "Returns hit/miss metrics and memory cache entries count for latency benchmarking.",
+        "operationId": "get_cache_stats_api_v1_energy_cache_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/energy/cache/clear": {
+      "post": {
+        "tags": [
+          "Energy Telemetry"
+        ],
+        "summary": "Clear energy TTL cache",
+        "description": "Manually invalidates cache entries.",
+        "operationId": "clear_cache_api_v1_energy_cache_clear_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/forecast/predict": {
+      "get": {
+        "tags": [
+          "Forecasting Engine"
+        ],
+        "summary": "Get Forecast",
+        "operationId": "get_forecast_api_v1_forecast_predict_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/anomalies/events": {
+      "get": {
+        "tags": [
+          "Anomaly Detection"
+        ],
+        "summary": "Get list of detected anomaly incidents",
+        "description": "Returns detected anomaly incidents with their active lifecycle statuses\n(OPEN, ACKNOWLEDGED, RESOLVED) loaded from PostgreSQL.",
+        "operationId": "list_anomalies_api_v1_anomalies_events_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AnomalyEvent"
+                  },
+                  "type": "array",
+                  "title": "Response List Anomalies Api V1 Anomalies Events Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/anomalies/{anomaly_id}/status": {
+      "patch": {
+        "tags": [
+          "Anomaly Detection"
+        ],
+        "summary": "Update incident lifecycle status",
+        "description": "Updates the lifecycle state of a specific anomaly event.\nTransitions: OPEN -> ACKNOWLEDGED -> RESOLVED.\nPersists the update directly into PostgreSQL database.",
+        "operationId": "update_anomaly_status_api_v1_anomalies__anomaly_id__status_patch",
+        "parameters": [
+          {
+            "name": "anomaly_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Anomaly Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnomalyStatusUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnomalyStatusUpdateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/copilot/chat": {
+      "post": {
+        "tags": [
+          "LLM Energy Copilot"
+        ],
+        "summary": "Chat With Copilot",
+        "operationId": "chat_with_copilot_api_v1_copilot_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopilotChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CopilotChatResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/copilot/experiment-stats": {
+      "get": {
+        "tags": [
+          "LLM Energy Copilot"
+        ],
+        "summary": "Get Experiment Stats",
+        "description": "Tr\u1ea3 v\u1ec1 th\u1ed1ng k\u00ea s\u1ed1 li\u1ec7u t\u01b0\u01a1ng t\u00e1c v\u00e0 hi\u1ec7u n\u0103ng v\u1eadn h\u00e0nh c\u1ee7a Copilot Agent.",
+        "operationId": "get_experiment_stats_api_v1_copilot_experiment_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "summary": "Root",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AnomalyEvent": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "subsystem": {
+            "type": "string",
+            "title": "Subsystem",
+            "description": "Affected facility subsystem",
+            "default": "Chiller & HVAC Plant"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity",
+            "description": "Severity classification (LOW, MEDIUM, CRITICAL)"
+          },
+          "anomaly_score": {
+            "type": "number",
+            "title": "Anomaly Score",
+            "description": "Isolation Forest anomaly decision score"
+          },
+          "actual_kwh": {
+            "type": "number",
+            "title": "Actual Kwh",
+            "description": "Actual recorded power consumption in kWh"
+          },
+          "predicted_kwh": {
+            "type": "number",
+            "title": "Predicted Kwh",
+            "description": "Baseline expected power consumption in kWh"
+          },
+          "delta_kwh": {
+            "type": "number",
+            "title": "Delta Kwh",
+            "description": "Excess residual power consumption above baseline"
+          },
+          "outdoor_temp_c": {
+            "type": "number",
+            "title": "Outdoor Temp C",
+            "description": "Outside air temperature in Celsius"
+          },
+          "estimated_waste_vnd": {
+            "type": "number",
+            "title": "Estimated Waste Vnd",
+            "description": "Calculated energy waste cost in VND"
+          },
+          "estimated_waste_usd": {
+            "type": "number",
+            "title": "Estimated Waste Usd",
+            "description": "Calculated energy waste cost in USD"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Current incident lifecycle state: OPEN, ACKNOWLEDGED, RESOLVED",
+            "default": "OPEN"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Diagnostic explanation or reason"
+          },
+          "suggested_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Action",
+            "description": "Recommended operational corrective action"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "timestamp",
+          "severity",
+          "anomaly_score",
+          "actual_kwh",
+          "predicted_kwh",
+          "delta_kwh",
+          "outdoor_temp_c",
+          "estimated_waste_vnd",
+          "estimated_waste_usd"
+        ],
+        "title": "AnomalyEvent",
+        "description": "Telemetry anomaly event returned to Frontend dashboard."
+      },
+      "AnomalyStatusUpdateRequest": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "ACKNOWLEDGED",
+              "RESOLVED"
+            ],
+            "title": "Status",
+            "description": "Target lifecycle state. Must be one of: OPEN, ACKNOWLEDGED, RESOLVED",
+            "examples": [
+              "ACKNOWLEDGED"
+            ]
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "description": "Optional operator remediation note or diagnostic log",
+            "examples": [
+              "Technician inspected HVAC chiller C-1. Setpoint recalibrated."
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "AnomalyStatusUpdateRequest",
+        "description": "Payload for updating an anomaly event's lifecycle status."
+      },
+      "AnomalyStatusUpdateResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "previous_status": {
+            "type": "string",
+            "title": "Previous Status"
+          },
+          "current_status": {
+            "type": "string",
+            "title": "Current Status"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "previous_status",
+          "current_status",
+          "updated_at",
+          "message"
+        ],
+        "title": "AnomalyStatusUpdateResponse",
+        "description": "Response payload confirming anomaly status transition."
+      },
+      "BuildingCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Building display name",
+            "examples": [
+              "Hog Betsy Office Tower"
+            ]
+          },
+          "building_type": {
+            "type": "string",
+            "title": "Building Type",
+            "description": "Building sector / category",
+            "default": "Office",
+            "examples": [
+              "Office"
+            ]
+          },
+          "total_area_sqm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Area Sqm",
+            "description": "Total gross floor area in m2",
+            "examples": [
+              12500.0
+            ]
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "City or facility campus",
+            "examples": [
+              "Hanoi, Vietnam"
+            ]
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone",
+            "description": "Local timezone identifier",
+            "default": "UTC",
+            "examples": [
+              "Asia/Ho_Chi_Minh"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Unique alphanumeric building code",
+            "examples": [
+              "office_tower_01"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "id"
+        ],
+        "title": "BuildingCreate"
+      },
+      "BuildingHistoryResponse": {
+        "properties": {
+          "building_id": {
+            "type": "string",
+            "title": "Building Id"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/HistoricalReadingPoint"
+            },
+            "type": "array",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "building_id",
+          "count",
+          "data"
+        ],
+        "title": "BuildingHistoryResponse"
+      },
+      "BuildingListResponse": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total count of registered buildings"
+          },
+          "buildings": {
+            "items": {
+              "$ref": "#/components/schemas/BuildingResponse"
+            },
+            "type": "array",
+            "title": "Buildings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "buildings"
+        ],
+        "title": "BuildingListResponse"
+      },
+      "BuildingResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Building display name",
+            "examples": [
+              "Hog Betsy Office Tower"
+            ]
+          },
+          "building_type": {
+            "type": "string",
+            "title": "Building Type",
+            "description": "Building sector / category",
+            "default": "Office",
+            "examples": [
+              "Office"
+            ]
+          },
+          "total_area_sqm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Area Sqm",
+            "description": "Total gross floor area in m2",
+            "examples": [
+              12500.0
+            ]
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "City or facility campus",
+            "examples": [
+              "Hanoi, Vietnam"
+            ]
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone",
+            "description": "Local timezone identifier",
+            "default": "UTC",
+            "examples": [
+              "Asia/Ho_Chi_Minh"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "id",
+          "created_at"
+        ],
+        "title": "BuildingResponse"
+      },
+      "ChatMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "tool_calls": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Calls"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ChatMessage"
+      },
+      "CopilotChatRequest": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "building_id": {
+            "type": "string",
+            "title": "Building Id",
+            "default": "office_tower_01"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            },
+            "type": "array",
+            "title": "History",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "CopilotChatRequest"
+      },
+      "CopilotChatResponse": {
+        "properties": {
+          "reply": {
+            "type": "string",
+            "title": "Reply"
+          },
+          "tools_used": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tools Used",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "reply"
+        ],
+        "title": "CopilotChatResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HistoricalReadingPoint": {
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "meter_reading_kwh": {
+            "type": "number",
+            "title": "Meter Reading Kwh"
+          },
+          "outdoor_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outdoor Temperature C"
+          },
+          "relative_humidity_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relative Humidity Pct"
+          }
+        },
+        "type": "object",
+        "required": [
+          "timestamp",
+          "meter_reading_kwh"
+        ],
+        "title": "HistoricalReadingPoint"
+      },
+      "MetricSummaryResponse": {
+        "properties": {
+          "building_id": {
+            "type": "string",
+            "title": "Building Id"
+          },
+          "total_consumption_kwh": {
+            "type": "number",
+            "title": "Total Consumption Kwh"
+          },
+          "peak_demand_kw": {
+            "type": "number",
+            "title": "Peak Demand Kw"
+          },
+          "predicted_baseline_kwh": {
+            "type": "number",
+            "title": "Predicted Baseline Kwh"
+          },
+          "total_anomalies_detected": {
+            "type": "integer",
+            "title": "Total Anomalies Detected"
+          },
+          "estimated_waste_cost_vnd": {
+            "type": "number",
+            "title": "Estimated Waste Cost Vnd"
+          },
+          "estimated_waste_cost_usd": {
+            "type": "number",
+            "title": "Estimated Waste Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "building_id",
+          "total_consumption_kwh",
+          "peak_demand_kw",
+          "predicted_baseline_kwh",
+          "total_anomalies_detected",
+          "estimated_waste_cost_vnd",
+          "estimated_waste_cost_usd"
+        ],
+        "title": "MetricSummaryResponse"
+      },
+      "TimeSeriesPoint": {
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "meter_reading_kwh": {
+            "type": "number",
+            "title": "Meter Reading Kwh"
+          },
+          "predicted_kwh": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Predicted Kwh"
+          },
+          "lower_bound_95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lower Bound 95"
+          },
+          "upper_bound_95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upper Bound 95"
+          },
+          "outdoor_temperature_c": {
+            "type": "number",
+            "title": "Outdoor Temperature C"
+          },
+          "relative_humidity_pct": {
+            "type": "number",
+            "title": "Relative Humidity Pct"
+          },
+          "is_anomaly": {
+            "type": "boolean",
+            "title": "Is Anomaly",
+            "default": false
+          },
+          "anomaly_score": {
+            "type": "number",
+            "title": "Anomaly Score",
+            "default": 0.0
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity",
+            "default": "Normal"
+          },
+          "anomaly_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anomaly Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "timestamp",
+          "meter_reading_kwh",
+          "outdoor_temperature_c",
+          "relative_humidity_pct"
+        ],
+        "title": "TimeSeriesPoint"
+      },
+      "TimeSeriesResponse": {
+        "properties": {
+          "building_id": {
+            "type": "string",
+            "title": "Building Id"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TimeSeriesPoint"
+            },
+            "type": "array",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "building_id",
+          "count",
+          "data"
+        ],
+        "title": "TimeSeriesResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

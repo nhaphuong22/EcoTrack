@@ -1,0 +1,28 @@
+{
+  "name": "ecotrack",
+  "version": "1.0.0",
+  "private": true,
+  "description": "EcoTrack - Smart Building Energy Management System",
+  "scripts": {
+    "dev": "npx concurrently -n \"AI,BACKEND,FRONTEND\" -c \"magenta,green,cyan\" \"python -m uvicorn src.main:app --app-dir ai-service --reload --port 8000\" \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "dev:docker": "docker compose up -d db && npm run dev",
+    "dev:all": "docker compose up",
+    "install:all": "npm install --prefix backend && npm install --prefix frontend && pip install -r ai-service/requirements.txt -r ai-service/requirements-experiments.txt",
+    "install:backend": "npm install --prefix backend",
+    "install:frontend": "npm install --prefix frontend",
+    "install:ai": "pip install -r ai-service/requirements.txt -r ai-service/requirements-experiments.txt",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "db:migrate": "npm run prisma:migrate --prefix backend",
+    "db:push": "npm run prisma:push --prefix backend",
+    "db:studio": "npm run prisma:studio --prefix backend",
+    "db:generate": "npm run prisma:generate --prefix backend",
+    "test:ai": "pytest ai-service",
+    "test:backend": "npm test --prefix backend",
+    "test": "pytest ai-service && npm test --prefix backend",
+    "check:ci": "powershell -ExecutionPolicy Bypass -File ./check_ci.ps1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
