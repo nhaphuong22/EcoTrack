@@ -1,4 +1,5 @@
 import json
+import logging
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,6 +12,8 @@ import pandas as pd
 from src.config import get_data_path, get_models_dir, get_tariff_rate_usd, get_tariff_rate_vnd
 from src.data_pipeline.inference_pipeline import EnergyInferencePipeline
 from src.models.train_models import engineer_features, load_dataset
+
+logger = logging.getLogger("ServingFrame")
 
 
 class ServingDataError(Exception):
@@ -58,6 +61,61 @@ def reset_serving_cache() -> None:
         _cached_pipeline = None
 
 
+def _mlflow_disabled() -> bool:
+    """When ``ECOTRACK_DISABLE_MLFLOW`` is truthy, always serve from ``models_saved/``."""
+    from src.mlops.config import mlflow_disabled
+
+    return mlflow_disabled()
+
+
+def _load_champion_forecaster_or_fallback(xgb_path: Path) -> Any:
+    """
+    Resolve the forecaster through the MLflow ``champion`` alias when MLflow is
+    initialised (Story 4.5 FR23); otherwise load it from ``models_saved/``.
+
+    Tri-state:
+      * champion resolves + loads -> return the champion model,
+      * MLflow not installed / not initialised / no champion alias -> fall back to
+        ``xgb_path`` with a logged warning,
+      * champion alias resolves but the artifact is broken / backend locked ->
+        raise ``ModelArtifactError`` (-> 503 ERR_MODEL_NOT_FOUND), **no** fallback.
+    """
+    if not _mlflow_disabled():
+        try:
+            from src.mlops.tracking import (
+                ChampionArtifactError,
+                ChampionUnavailable,
+                load_champion_forecaster,
+            )
+
+            model, version = load_champion_forecaster()
+            logger.info("Serving forecaster from MLflow champion version %s.", version)
+            return model
+        except ChampionArtifactError as exc:
+            # Alias resolved but the artifact is unusable: fail loud, do not mask.
+            raise ModelArtifactError(
+                f"Champion model version {exc.version} failed to load: {exc}",
+                file_path=f"champion:{exc.version}",
+            ) from exc
+        except ChampionUnavailable as exc:
+            logger.warning(
+                "MLflow champion unavailable (%s); falling back to models_saved/ forecaster.", exc
+            )
+        except ModelArtifactError:
+            raise
+        except Exception as exc:  # mlops import / unexpected config error -> safe fallback
+            logger.warning(
+                "Champion resolution skipped (%s); falling back to models_saved/ forecaster.", exc
+            )
+
+    if not xgb_path.exists():
+        raise ModelArtifactError(f"Model artifact not found: {xgb_path}", file_path=str(xgb_path))
+    try:
+        return joblib.load(xgb_path)
+    except Exception as exc:
+        raise ModelArtifactError(f"Failed to load model artifact: {exc}", file_path=str(xgb_path)) from exc
+
+
 def _load_artifacts_and_base_frame(data_path: Path, models_dir: Path) -> Tuple[pd.DataFrame, Dict[str, Any], Any]:
     if not data_path.exists():
         raise ServingDataError(f"Processed dataset not found at: {data_path}", path=str(data_path))
@@ -66,14 +124,20 @@ def _load_artifacts_and_base_frame(data_path: Path, models_dir: Path) -> Tuple[p
     iso_path = models_dir / "isolation_forest.joblib"
     meta_path = models_dir / "model_metadata.json"
 
-    for required_file in (xgb_path, iso_path, meta_path):
+    # Forecaster: champion-first with tri-state fallback/fail-loud (FR23). Resolved before the
+    # detector/metadata so a fully-missing models_saved/ still surfaces the forecaster artifact
+    # first (preserving the Story 1.5 error contract).
+    xgb_model = _load_champion_forecaster_or_fallback(xgb_path)
+
+    # Metadata and the Isolation Forest always come from models_saved/ (the detector keeps
+    # loading from disk; Story 4.7 opens its own MLflow run).
+    for required_file in (iso_path, meta_path):
         if not required_file.exists():
             raise ModelArtifactError(f"Model artifact not found: {required_file}", file_path=str(required_file))
 
     try:
         with open(meta_path, "r", encoding="utf-8") as f:
             metadata = json.load(f)
-        xgb_model = joblib.load(xgb_path)
         iso_model = joblib.load(iso_path)
     except Exception as e:
         raise ModelArtifactError(f"Failed to load model artifact: {e}", file_path=str(models_dir))

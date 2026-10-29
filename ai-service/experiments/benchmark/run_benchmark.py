@@ -5,11 +5,12 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import os
 from pathlib import Path
 import sys
-from typing import Optional
+from typing import List, Optional
 import pandas as pd
 
 from src.models.train_models import (
@@ -18,6 +19,7 @@ from src.models.train_models import (
     split_time_series_data,
 )
 from experiments.benchmark.benchmark import DEFAULT_HORIZON, run_horizon_scoring, run_scoring
+from experiments.benchmark.models import BaseForecaster, get_registered_forecasters
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,12 +42,30 @@ def get_default_paths() -> tuple[Path, Path]:
     return default_data_path, default_output_path
 
 
+def build_tuned_models(params_file: Path) -> List[BaseForecaster]:
+    """
+    Construct the registered forecasters and apply the tuned hyperparameters from
+    ``best_params.json`` (Story 4.5). Models without tuned params keep their defaults,
+    so the result is directly comparable against the untuned ``results.csv``.
+    """
+    with open(params_file, "r", encoding="utf-8") as f:
+        best = json.load(f)
+    models = get_registered_forecasters()
+    for model in models:
+        params = best.get(model.name)
+        if params and hasattr(model, "set_params"):
+            model.set_params(**params)
+            logger.info("Applied tuned params to '%s': %s", model.name, params)
+    return models
+
+
 def execute_benchmark(
     data_path: Optional[Path] = None,
     output_path: Optional[Path] = None,
     by_horizon_path: Optional[Path] = None,
     predictions_path: Optional[Path] = None,
     horizon: int = DEFAULT_HORIZON,
+    models: Optional[List[BaseForecaster]] = None,
 ) -> pd.DataFrame:
     """
     Executes the end-to-end benchmark evaluation and writes results to disk.
@@ -100,7 +120,7 @@ def execute_benchmark(
     logger.info("Partitions prepared: Train=%d rows, Test=%d rows.", len(train_df), len(test_df))
 
     logger.info("Evaluating registered models (hour-1 aggregate)...")
-    results_df = run_scoring(train_df=train_df, test_df=test_df)
+    results_df = run_scoring(train_df=train_df, test_df=test_df, models=models)
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
     results_df.to_csv(out_file, index=False)
@@ -108,7 +128,7 @@ def execute_benchmark(
 
     logger.info("Scoring per-horizon (1..%d h) across the rolling forecast origin...", horizon)
     by_horizon_df, predictions_df = run_horizon_scoring(
-        train_df=train_df, test_df=test_df, horizon=horizon
+        train_df=train_df, test_df=test_df, horizon=horizon, models=models
     )
     by_horizon_file.parent.mkdir(parents=True, exist_ok=True)
     by_horizon_df.to_csv(by_horizon_file, index=False)
@@ -181,8 +201,22 @@ def main() -> None:
         default=DEFAULT_HORIZON,
         help="Maximum forecast horizon in hours (default: 24).",
     )
+    parser.add_argument(
+        "--params-file",
+        type=Path,
+        default=None,
+        help="Optional best_params.json from the Optuna search (Story 4.5); applies tuned "
+        "hyperparameters to produce the tuned comparison rows.",
+    )
 
     args = parser.parse_args()
+
+    tuned_models = None
+    if args.params_file is not None:
+        if not args.params_file.exists():
+            logger.error("Params file not found: %s", args.params_file)
+            sys.exit(1)
+        tuned_models = build_tuned_models(args.params_file)
 
     try:
         results_df = execute_benchmark(
@@ -191,6 +225,7 @@ def main() -> None:
             by_horizon_path=args.results_by_horizon,
             predictions_path=args.predictions,
             horizon=args.horizon,
+            models=tuned_models,
         )
         print_summary_table(results_df)
     except FileNotFoundError as e:

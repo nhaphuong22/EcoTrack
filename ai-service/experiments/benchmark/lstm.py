@@ -11,6 +11,7 @@ XGBoost's lag_1h and SARIMAX's one-step roll.
 """
 
 import logging
+import time
 from typing import Optional, Tuple
 
 import numpy as np
@@ -47,15 +48,15 @@ _TARGET_INDEX = LSTM_FEATURES.index("meter_reading")
 class _LSTMNet(torch.nn.Module):
     """168-hour multivariate window in, 24-hour meter_reading window out."""
 
-    def __init__(self) -> None:
+    def __init__(self, hidden_size: int = LSTM_HIDDEN_SIZE, num_layers: int = LSTM_NUM_LAYERS) -> None:
         super().__init__()
         self.lstm = torch.nn.LSTM(
             input_size=len(LSTM_FEATURES),
-            hidden_size=LSTM_HIDDEN_SIZE,
-            num_layers=LSTM_NUM_LAYERS,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
             batch_first=True,
         )
-        self.head = torch.nn.Linear(LSTM_HIDDEN_SIZE, LSTM_OUTPUT_HOURS)
+        self.head = torch.nn.Linear(hidden_size, LSTM_OUTPUT_HOURS)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         output, _ = self.lstm(x)
@@ -86,7 +87,26 @@ class LSTMForecaster(BaseForecaster):
 
     name: str = "lstm"
 
-    def __init__(self) -> None:
+    # Tunable hyperparameters (Story 4.5). ``None`` means "use the module-level default",
+    # resolved at fit() time via :meth:`_hp` — so a test monkeypatching the module globals
+    # keeps working, and an Optuna trial can override any subset without touching the globals.
+    TUNABLE_PARAMS: Tuple[str, ...] = (
+        "hidden_size",
+        "num_layers",
+        "learning_rate",
+        "batch_size",
+        "max_epochs",
+        "patience",
+    )
+
+    def __init__(self, **params: object) -> None:
+        self._overrides: dict = {}
+        # Per-fit wall-clock budget (seconds). None = no cap. Story 4.5 sets this during the
+        # Optuna search so a trial cannot overrun the ~5-minute per-trial cap; it is enforced
+        # inside the epoch loop (an elapsed-time check), not as a study-level timeout.
+        self._time_budget_s: Optional[float] = None
+        if params:
+            self.set_params(**params)
         self._net: Optional[_LSTMNet] = None
         self._scaler: Optional[StandardScaler] = None
         self._history: Optional[np.ndarray] = None
@@ -94,6 +114,26 @@ class LSTMForecaster(BaseForecaster):
         self._val_y: Optional[np.ndarray] = None
         self._epochs_run: int = 0
         self._best_val_loss: float = float("inf")
+
+    def set_params(self, **params: object) -> "LSTMForecaster":
+        """Apply tuned hyperparameters (Story 4.5). Unknown keys are rejected. Returns self."""
+        for key, value in params.items():
+            if key not in self.TUNABLE_PARAMS:
+                raise ValueError(
+                    f"Unknown LSTM hyperparameter '{key}'; tunable: {self.TUNABLE_PARAMS}"
+                )
+            if value is not None:
+                self._overrides[key] = value
+        return self
+
+    def _hp(self, name: str, default: object) -> object:
+        """Resolve a hyperparameter: instance override if set, else the module default."""
+        return self._overrides.get(name, default)
+
+    def set_time_budget(self, seconds: Optional[float]) -> "LSTMForecaster":
+        """Cap a single fit() to ``seconds`` of wall-clock (checked between epochs). Returns self."""
+        self._time_budget_s = float(seconds) if seconds is not None else None
+        return self
 
     def __getstate__(self) -> dict:
         # The validation windows are training scaffolding, not part of the model: leave them
@@ -149,7 +189,10 @@ class LSTMForecaster(BaseForecaster):
         # Rows the scaler and the weights are fitted on (the validation slice only steers stopping).
         self.train_window_used = split
         self._history = scaled[-LSTM_INPUT_HOURS:]
-        self._net = _LSTMNet()
+        self._net = _LSTMNet(
+            hidden_size=int(self._hp("hidden_size", LSTM_HIDDEN_SIZE)),
+            num_layers=int(self._hp("num_layers", LSTM_NUM_LAYERS)),
+        )
         self._train_network(train_X, train_y)
         return self
 
@@ -157,7 +200,12 @@ class LSTMForecaster(BaseForecaster):
         net = self._net
         assert net is not None
 
-        optimizer = torch.optim.Adam(net.parameters(), lr=LSTM_LEARNING_RATE)
+        learning_rate = float(self._hp("learning_rate", LSTM_LEARNING_RATE))
+        batch_size = int(self._hp("batch_size", LSTM_BATCH_SIZE))
+        max_epochs = int(self._hp("max_epochs", LSTM_MAX_EPOCHS))
+        patience = int(self._hp("patience", LSTM_PATIENCE))
+
+        optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)
         loss_fn = torch.nn.MSELoss()
         inputs = torch.from_numpy(train_X)
         targets = torch.from_numpy(train_y)
@@ -166,14 +214,22 @@ class LSTMForecaster(BaseForecaster):
 
         generator = torch.Generator().manual_seed(LSTM_SEED)
         best_state = None
-        patience_left = LSTM_PATIENCE
+        patience_left = patience
         self._epochs_run = 0
+        start_time = time.perf_counter()
 
-        for _ in range(LSTM_MAX_EPOCHS):
+        for _ in range(max_epochs):
+            if self._time_budget_s is not None and (time.perf_counter() - start_time) >= self._time_budget_s:
+                logger.info(
+                    "LSTM training hit the %.0fs wall-clock budget after %d epoch(s); stopping.",
+                    self._time_budget_s,
+                    self._epochs_run,
+                )
+                break
             net.train()
             order = torch.randperm(len(inputs), generator=generator)
-            for start in range(0, len(inputs), LSTM_BATCH_SIZE):
-                batch = order[start : start + LSTM_BATCH_SIZE]
+            for start in range(0, len(inputs), batch_size):
+                batch = order[start : start + batch_size]
                 optimizer.zero_grad()
                 loss = loss_fn(net(inputs[batch]), targets[batch])
                 loss.backward()
@@ -183,7 +239,7 @@ class LSTMForecaster(BaseForecaster):
 
             if val_inputs is None:
                 # Minimum-data case: nothing to hold out, so train to the cap.
-                logger.info("LSTM epoch %d/%d done (no validation slice).", self._epochs_run, LSTM_MAX_EPOCHS)
+                logger.info("LSTM epoch %d/%d done (no validation slice).", self._epochs_run, max_epochs)
                 continue
 
             net.eval()
@@ -194,7 +250,7 @@ class LSTMForecaster(BaseForecaster):
             logger.info(
                 "LSTM epoch %d/%d: validation loss %.5f%s",
                 self._epochs_run,
-                LSTM_MAX_EPOCHS,
+                max_epochs,
                 val_loss,
                 " (best so far)" if improved else "",
             )
@@ -202,7 +258,7 @@ class LSTMForecaster(BaseForecaster):
             if improved:
                 self._best_val_loss = val_loss
                 best_state = {k: v.detach().clone() for k, v in net.state_dict().items()}
-                patience_left = LSTM_PATIENCE
+                patience_left = patience
             else:
                 patience_left -= 1
                 if patience_left <= 0:
@@ -213,7 +269,7 @@ class LSTMForecaster(BaseForecaster):
             logger.info(
                 "LSTM training finished after %d epoch(s) (%s); restored the weights with validation loss %.5f.",
                 self._epochs_run,
-                "stopped early" if self._epochs_run < LSTM_MAX_EPOCHS else "reached the epoch cap",
+                "stopped early" if self._epochs_run < max_epochs else "reached the epoch cap",
                 self._best_val_loss,
             )
 

@@ -146,18 +146,36 @@ class XGBoostForecaster(BaseForecaster):
 
     name: str = "xgboost"
 
-    def __init__(self, random_state: int = 42):
+    # Default hyperparameters — kept identical to src/models/train_models.py so the untuned
+    # benchmark row reproduces the served model. Story 4.5's Optuna search overrides a subset
+    # of these via `params=` / `set_params()` to produce the tuned comparison row.
+    DEFAULT_PARAMS: Dict[str, object] = {
+        "n_estimators": 350,
+        "max_depth": 4,
+        "learning_rate": 0.05,
+        "subsample": 0.85,
+        "colsample_bytree": 0.85,
+        "objective": "reg:squarederror",
+        "n_jobs": -1,
+    }
+
+    def __init__(self, random_state: int = 42, params: Optional[Dict[str, object]] = None):
         self.random_state = random_state
-        self.model = xgb.XGBRegressor(
-            n_estimators=350,
-            max_depth=4,
-            learning_rate=0.05,
-            subsample=0.85,
-            colsample_bytree=0.85,
-            objective="reg:squarederror",
-            random_state=self.random_state,
-            n_jobs=-1,
-        )
+        self.params: Dict[str, object] = dict(self.DEFAULT_PARAMS)
+        if params:
+            self.params.update(params)
+        self._build_model()
+
+    def _build_model(self) -> None:
+        self.model = xgb.XGBRegressor(random_state=self.random_state, **self.params)
+
+    def set_params(self, **params: object) -> "XGBoostForecaster":
+        """Apply tuned hyperparameters (Story 4.5) and rebuild the estimator. Returns self."""
+        if "random_state" in params:
+            self.random_state = int(params.pop("random_state"))
+        self.params.update(params)
+        self._build_model()
+        return self
 
     def fit(self, train_df: pd.DataFrame) -> "XGBoostForecaster":
         X_train = train_df[XGB_FEATURE_COLUMNS]

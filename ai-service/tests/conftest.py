@@ -54,10 +54,15 @@ def setup_test_environment():
     old_data_path = os.environ.get("ECOTRACK_DATA_PATH")
     old_models_dir = os.environ.get("ECOTRACK_MODELS_DIR")
     old_internal_key = os.environ.get("INTERNAL_API_KEY")
+    old_disable_mlflow = os.environ.get("ECOTRACK_DISABLE_MLFLOW")
 
     os.environ["ECOTRACK_DATA_PATH"] = str(fixture_csv)
     os.environ["ECOTRACK_MODELS_DIR"] = str(temp_models_dir)
     os.environ["INTERNAL_API_KEY"] = "test-internal-token"
+    # Default the suite to the models_saved/ serving path so a stray MLflow store on the
+    # owner's machine cannot leak a real champion into fixture-based tests. The dedicated
+    # champion-load tests opt back in with their own temp store (Story 4.5).
+    os.environ["ECOTRACK_DISABLE_MLFLOW"] = "1"
     reset_serving_cache()
 
     yield {
@@ -81,6 +86,11 @@ def setup_test_environment():
         os.environ["INTERNAL_API_KEY"] = old_internal_key
     else:
         os.environ.pop("INTERNAL_API_KEY", None)
+
+    if old_disable_mlflow is not None:
+        os.environ["ECOTRACK_DISABLE_MLFLOW"] = old_disable_mlflow
+    else:
+        os.environ.pop("ECOTRACK_DISABLE_MLFLOW", None)
 
     shutil.rmtree(temp_dir, ignore_errors=True)
 

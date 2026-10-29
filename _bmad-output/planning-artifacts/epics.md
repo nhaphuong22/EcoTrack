@@ -789,17 +789,23 @@ So that I can trace which run produced the model in production.
 **When** the best parameters are applied
 **Then** the benchmark is re-run with them and the tuned and untuned rows can be compared for both models
 
-**Given** MLflow configured with a local SQLite backend
+**Given** MLflow configured with a local SQLite backend stored at a repo-relative path (`ai-service/mlruns/mlflow.db` with its artifact store under `ai-service/mlruns/`), mounted into the AI service container through a Docker volume so the same store is visible to the owner's training runs and to the container at runtime
 **When** `train_models.py` runs
 **Then** the run logs hyperparameters, RMSE, MAE, MAPE, R², the feature list, the data row counts and the model artifacts
+**And** the tracking URI and artifact root are read from configuration as relative paths, never as an absolute machine-specific path
 
 **Given** a completed training run
 **When** it is registered
 **Then** the model version receives the `champion` alias only if no champion exists yet
+**And** registering the first champion is idempotent and guarded against a concurrent run claiming the alias at the same time; promoting a better model over an existing champion is out of scope here and belongs to Story 4.8
 
-**Given** the AI service starts
+**Given** the AI service starts and MLflow is not initialised (no tracking store or no `champion` alias)
 **When** it loads the forecast model
-**Then** it loads the version behind the `champion` alias, and falls back to `models_saved/` with a logged warning if MLflow is not initialised
+**Then** it falls back to `models_saved/` with a logged warning and serves normally
+
+**Given** the AI service starts and the `champion` alias resolves, but its artifact is missing or corrupt or the SQLite backend is locked
+**When** it loads the forecast model
+**Then** it does not silently fall back; it surfaces the same explicit `503` `ERR_MODEL_NOT_FOUND` error used in Epic 1 Story 1.5, naming the champion version it failed to load
 
 ### Story 4.6: Detect data drift and accuracy decay
 

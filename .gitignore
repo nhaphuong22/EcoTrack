@@ -6,6 +6,9 @@
 *.key
 
 # 2. Python & Machine Learning
+# MLflow tracking store + Optuna study (runtime/dev artifacts, never source; Story 4.5)
+ai-service/mlruns/
+**/mlruns/
 __pycache__/
 *.py[cod]
 *$py.class

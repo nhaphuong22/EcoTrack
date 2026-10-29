@@ -101,6 +101,16 @@ def health(details: bool = False):
     xgb_exists = (models_dir / "xgboost_forecaster.joblib").is_file()
     iso_exists = (models_dir / "isolation_forest.joblib").is_file()
 
+    # Report whether an MLflow champion is resolvable (Story 4.5), feeding Story 2.3 / 4.10
+    # status. Best-effort: never raises, falls back to None when MLflow is not initialised.
+    champion_version = None
+    try:
+        from src.mlops.tracking import resolve_champion_version
+
+        champion_version = resolve_champion_version()
+    except Exception:
+        champion_version = None
+
     copilot_engine = "rule_based_fallback"
     if os.getenv("GEMINI_API_KEY", "").strip():
         copilot_engine = "google_genai"
@@ -110,8 +120,10 @@ def health(details: bool = False):
     return {
         "status": "healthy",
         "models": {
-            "forecast": "loaded" if xgb_exists else "unavailable",
+            "forecast": "loaded" if (xgb_exists or champion_version) else "unavailable",
             "anomaly": "loaded" if iso_exists else "unavailable",
+            "champion_version": champion_version,
+            "champion": "resolved" if champion_version else "unavailable",
         },
         "copilot_engine": copilot_engine,
     }

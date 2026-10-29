@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-08-2026 21:56
-last_updated: 10-23-2026 14:10
+last_updated: 10-29-2026 14:30
 project: EcoTrack
 project_key: NOKEY
 tracking_system: file-system
@@ -67,7 +67,7 @@ development_status:
   4-2-add-a-statistical-baseline-sarimax: done
   4-3-add-an-lstm-forecaster: done
   4-4-benchmark-report-and-model-recommendation: done
-  4-5-track-training-runs-and-register-the-serving-model: backlog
+  4-5-track-training-runs-and-register-the-serving-model: review
   4-6-detect-data-drift-and-accuracy-decay: backlog
   4-7-measure-anomaly-detector-quality: backlog
   4-8-retrain-on-demand-with-guarded-promotion: backlog
