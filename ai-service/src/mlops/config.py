@@ -32,6 +32,14 @@ OPTUNA_TRIAL_TIMEOUT_S: float = float(os.getenv("OPTUNA_TRIAL_TIMEOUT_S", "300")
 OPTUNA_N_STARTUP_TRIALS: int = int(os.getenv("OPTUNA_N_STARTUP_TRIALS", "5"))
 OPTUNA_SEED: int = int(os.getenv("OPTUNA_SEED", "42"))
 
+# Drift thresholds (Story 4.6 — FR24). A column is flagged when its KS test
+# p-value drops below DRIFT_KS_PVALUE_THRESHOLD *and* its PSI exceeds
+# DRIFT_PSI_THRESHOLD; the rolling-MAPE signal fires independently above
+# DRIFT_MAPE_THRESHOLD_PERCENT. Defaults match the epics.md acceptance criteria.
+DRIFT_KS_PVALUE_THRESHOLD: float = float(os.getenv("DRIFT_KS_PVALUE_THRESHOLD", "0.05"))
+DRIFT_PSI_THRESHOLD: float = float(os.getenv("DRIFT_PSI_THRESHOLD", "0.2"))
+DRIFT_MAPE_THRESHOLD_PERCENT: float = float(os.getenv("DRIFT_MAPE_THRESHOLD_PERCENT", "15.0"))
+
 
 def mlruns_dir() -> Path:
     """Absolute path to the repo-relative ``ai-service/mlruns/`` store directory."""
