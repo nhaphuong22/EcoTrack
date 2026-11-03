@@ -26,7 +26,6 @@ from src.models.train_models import (
 )
 
 FIXTURE_CSV = Path(__file__).resolve().parent / "fixtures" / "office_building_sample.csv"
-ANOMALY_THRESHOLD_KWH = 500.0  # scenario injects ~750 kWh against a ~230 kWh baseline
 
 
 class _ExactPredictor:
@@ -115,14 +114,22 @@ def test_hvac_overrun_scenario_reports_drift_via_rolling_mape():
     reference_df, _test_df, champion = _reference_and_champion()
 
     raw_fixture = pd.read_csv(FIXTURE_CSV)
+    raw_fixture["timestamp"] = pd.to_datetime(raw_fixture["timestamp"])
+    raw_fixture = raw_fixture.sort_values("timestamp").reset_index(drop=True)
+
     scenario_df = generate_scenario_hvac_night_overrun(base_df=raw_fixture)
     scenario_df = scenario_df.copy()
     scenario_df["timestamp"] = pd.to_datetime(scenario_df["timestamp"])
 
-    anomalous = scenario_df[scenario_df["meter_reading"] > ANOMALY_THRESHOLD_KWH]
-    assert not anomalous.empty, "scenario fixture did not inject an overrun above the test threshold"
-    anomaly_start = anomalous.index.min()
-    anomaly_end = anomalous.index.max()
+    # Isolate exactly the rows the generator modified -- thresholding on an
+    # absolute kWh value instead picked up an unrelated, naturally high
+    # reading later in the fixture and diluted the window below.
+    injected = (scenario_df["meter_reading"] - raw_fixture["meter_reading"]).abs() > 50.0
+    assert injected.any(), "scenario fixture did not inject any overrun rows"
+    injected_idx = scenario_df.index[injected]
+    anomaly_start = injected_idx.min()
+    anomaly_end = injected_idx.max()
+    assert anomaly_end - anomaly_start < 24, "expected a single short injected overrun window"
 
     # Keep a short lead-in before the anomaly so the 8 injected hours dominate the
     # recent window once engineer_features() drops the first 24 (lag) rows.
