@@ -21,7 +21,7 @@ Pop-Location
 # 2. Pytest AI Service Tests
 Write-Host "`n[2/4] Chay kiem thu AI Service (Pytest RAG & Smoke tests)..." -ForegroundColor Yellow
 Push-Location "$ROOT_DIR\ai-service"
-& $PYTEST tests/test_smoke.py tests/test_rag.py -q
+& $PYTEST tests/test_smoke.py tests/test_rag.py tests/test_copilot_rag.py -q
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Pytest AI Service that bai!" -ForegroundColor Red
     Pop-Location
