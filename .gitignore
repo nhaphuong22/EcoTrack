@@ -37,6 +37,7 @@ build/
 data/raw/
 *.csv
 !ai-service/tests/fixtures/*.csv
+!ai-service/experiments/rag_eval/*.csv
 *.zip
 
 # 5. Hệ thống, IDE & AI Agents Cache

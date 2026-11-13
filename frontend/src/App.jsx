@@ -14,7 +14,15 @@ import { API_BASE_URL } from './services/api';
 
 export default function App() {
   const { metrics, timeSeries, anomalies, loading, error, refetch } = useEnergyData(168);
-  const { messages, isLoading: copilotLoading, error: copilotError, sendMessage, clearHistory } = useCopilot();
+  const {
+    messages,
+    isLoading: copilotLoading,
+    error: copilotError,
+    sendMessage,
+    stopStreaming,
+    retry,
+    clearHistory,
+  } = useCopilot();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'floorplan'
 
@@ -129,6 +137,8 @@ export default function App() {
         isLoading={copilotLoading}
         error={copilotError}
         sendMessage={sendMessage}
+        stopStreaming={stopStreaming}
+        retry={retry}
         clearHistory={clearHistory}
       />
     </div>

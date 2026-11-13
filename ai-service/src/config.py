@@ -21,3 +21,10 @@ def get_models_dir() -> Path:
 def get_internal_api_key() -> str | None:
     return os.getenv("INTERNAL_API_KEY")
 
+def get_gemini_model() -> str:
+    return os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+
+def get_openai_model() -> str:
+    return os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+

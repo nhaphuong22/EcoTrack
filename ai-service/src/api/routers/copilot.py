@@ -1,6 +1,8 @@
+import json
 import asyncio
 from typing import Any, Dict, List
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from src.agent.orchestrator import copilot_orchestrator
@@ -17,8 +19,8 @@ class InternalChatRequest(BaseModel):
 
 @router.post("/chat")
 async def chat_with_copilot(req: InternalChatRequest):
-    """Processes conversational reasoning with ReAct energy tools."""
-    reply, tools_used = await asyncio.to_thread(
+    """Processes conversational reasoning with ReAct energy tools, RAG, and multi-turn history."""
+    reply, tools_used, sources, engine = await asyncio.to_thread(
         copilot_orchestrator.process_chat,
         req.message,
         req.history,
@@ -26,7 +28,33 @@ async def chat_with_copilot(req: InternalChatRequest):
     return {
         "reply": reply,
         "tools_used": tools_used,
+        "sources": sources,
+        "engine": engine,
     }
+
+
+@router.post("/chat/stream")
+async def chat_with_copilot_stream(req: InternalChatRequest):
+    """Streams token-by-token Copilot answer over Server-Sent Events (SSE)."""
+    async def event_generator():
+        try:
+            async for event in copilot_orchestrator.stream_chat(req.message, req.history):
+                event_type = event.get("type", "token")
+                data_json = json.dumps(event, ensure_ascii=False)
+                yield f"event: {event_type}\ndata: {data_json}\n\n"
+        except Exception as err:
+            err_json = json.dumps({"error": str(err)}, ensure_ascii=False)
+            yield f"event: error\ndata: {err_json}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/experiment-stats")
