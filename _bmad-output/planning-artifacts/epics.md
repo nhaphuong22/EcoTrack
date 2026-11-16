@@ -4,6 +4,18 @@ stepsCompleted:
   - step-02-design-epics
   - step-03-create-stories
   - step-04-final-validation
+story48Refinement:
+  scope: 4-8-retrain-on-demand-with-guarded-promotion
+  stepsCompleted:
+    - step-01-validate-prerequisites
+    - step-02-design-epics
+    - step-03-create-stories
+    - step-04-final-validation
+  status: completed
+  elicitation:
+    methods: [assumption-audit, failure-mode-analysis, boundary-edge-case-sweep, problem-decomposition, second-order-thinking]
+    status: trimmed-via-party-mode
+    accepted: 2026-11-16
 inputDocuments:
   - plan.md
   - _bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/prd.md
@@ -12,6 +24,69 @@ inputDocuments:
 ---
 
 # EcoTrack - Epic Breakdown
+
+## Story 4.8 refinement — Requirements extraction (2026-11-16)
+
+Scope and source selection confirmed by the product owner. This scoped pass reuses the existing inventory and epic structure; the original completed workflow above remains historical. Story 4.8 wording and acceptance criteria have been refined and validated.
+
+### Functional requirements in scope
+
+- FR25 (manual portion): accept `POST /internal/mlops/retrain`, train a challenger on the latest data in a background thread, and immediately return HTTP 202 with a run ID.
+- FR25 (promotion guard): evaluate challenger and champion on the same holdout; promote only for strictly lower challenger MAPE. Equal or worse MAPE retains the champion.
+- FR25 (serving): assign the winning model the `champion` alias and serve it without restarting, as already required by Story 4.8.
+- FR25 (history): record timestamp, trigger `manual`, both MAPE values, and outcome `promoted` or `rejected` for completed evaluations.
+- FR25 (concurrency): return HTTP 409 when retraining is already running.
+- PRD FR-3 constraint: preserve chronological training/evaluation boundaries and prevent temporal leakage.
+- FR23 dependency: reuse the MLflow tracking and registered champion introduced in Story 4.5.
+- FR17 dependency: retain internal-token protection on the new internal endpoint.
+
+### Applicable non-functional requirements
+
+- NFR3: preserve the existing forecast latency target (p95 below 300 ms); do not interpret it as a training completion deadline.
+- NFR5: training and serving run on CPU.
+- NFR6 / AD-2: CPU-intensive work must not block the FastAPI event loop.
+- NFR7 / AD-5: API timestamps use ISO 8601 UTC.
+- NFR8: provide scope-specific pytest coverage and pass CI before merge.
+- PRD NFR-3: retain estimator-compatible model interfaces.
+
+### Architecture and scope boundaries
+
+- Extend the brownfield `ai-service/`; keep training/evaluation callable without FastAPI (AD-1). The older spine's ML paths under `backend/` map to `ai-service/` per the existing inventory.
+- Reuse serving features and artifacts; do not introduce a second training or inference stack.
+- Reconcile the source conflict explicitly: `plan.md` calls hot reload stretch work, while the existing Story 4.8 explicitly requires it. This refinement retains the story requirement pending requirements confirmation.
+- Scheduled/drift-triggered execution stays in Story 4.9; the status endpoint in 4.10; gateway proxy in 4.11; UI in 4.12; role gates in Epic 5.
+- No standalone UX contract was discovered. This story introduces an internal API and no UI work.
+- No starter template or database migration is prescribed by the selected sources for this story.
+
+### Clarifications proposed for acceptance-criteria drafting
+
+These are proposed safeguards, not requirements already specified by the sources:
+
+- Define one reproducible holdout snapshot excluded from challenger training, with identical scoring rules and a documented zero-target policy for MAPE.
+- On invalid or insufficient data, training/evaluation failure, or non-finite scores, retain the champion, record an explicit failure reason, and release the retrain lock.
+- If registry promotion or model reload fails, preserve a consistent usable champion and make the failed attempt traceable.
+- Define the run lifecycle and history fields for failures, including unavailable metrics, without conflating operational failure with a completed evaluation rejection.
+
+Requirements, including the proposed safeguards above, were confirmed by the product owner with `C` on 2026-11-16 and applied to Story 4.8 below.
+
+### Proposed epic placement and coverage
+
+- Retain Story 4.8 in the existing Epic 4 (model lifecycle); introduce no additional epic for this scoped refinement.
+- User outcome: an administrator can request a model refresh while the service retains its champion unless a challenger demonstrates lower MAPE on the shared holdout. This is a measured holdout guarantee, not a guarantee about all future forecasts.
+- FR25 manual retraining, promotion guard, concurrency, history, and confirmed failure safeguards map to Epic 4 / Story 4.8.
+- PRD FR-3 temporal separation constrains Story 4.8 evaluation; existing FR23 model tracking/registry (Story 4.5) and FR17 internal-token enforcement (Story 1.6) are prerequisites.
+- Story 4.8 must function through its internal endpoint without requiring later scheduling (4.9), status API (4.10), gateway (4.11), UI (4.12), or Epic 5 role gates. Persist history here for later status consumption.
+- Reuse the existing training, tracking, and serving modules within this epic. Their shared ownership supports retaining one model-lifecycle epic rather than splitting training, HTTP, and model loading into separate epics.
+
+Epic placement approved by the product owner on 2026-11-16; the global epic list and FR coverage map remain unchanged.
+
+### Accepted refinements after Party Mode review (2026-11-16)
+
+Following Advanced Elicitation and Party Mode review, the product owner approved trimming the 5 elicitation blocks down to 3 practical guardrails for Story 4.8 acceptance-criteria drafting (dropping multi-replica coordination and process-restart crash-recovery machinery):
+
+1. **Fair Holdout (No Temporal Leakage):** Evaluate both `champion` and `challenger` on a shared chronological holdout window strictly after the training cutoff of both models, using an identical MAPE rule with documented handling for zero targets (`y == 0`) and rejecting non-finite (`NaN`/`Inf`) scores. Promote only when `challenger_mape < champion_mape`.
+2. **Safe Hot-Reload:** Verify that the challenger artifact loads cleanly before updating the MLflow `champion` alias under `.champion.lock` and calling `reset_serving_cache()` in `serving_frame.py`. If promotion or reload fails, preserve the existing usable champion.
+3. **Three-State History & Lock Safety (`promoted` | `rejected` | `failed`):** Use an atomic in-process lock to return HTTP 409 on concurrent requests, always release the lock in a `finally` block across every terminal path, and persist history records (`run_id`, `timestamp`, `trigger`, `champion_mape`, `challenger_mape`, `outcome`, and optional `reason`) via a reusable retrain coordinator in `ai-service/src/mlops/` that Story 4.9 and Story 4.10 can consume.
 
 ## Overview
 
@@ -850,29 +925,39 @@ So that I can state how reliable its alerts are.
 ### Story 4.8: Retrain on demand with guarded promotion
 
 As an admin,
-I want to trigger retraining and have the new model replace the old one only if it is better,
-So that a retrain can never make forecasts worse.
+I want to trigger retraining and have the new model replace the old one only if it beats the current champion on an unbiased holdout set,
+So that a manual retrain refreshes the model safely and never degrades production forecasts.
 
-**Implements:** FR25
+**Implements:** FR25, NFR3, NFR5, NFR6, NFR7, NFR8 (builds on FR17, FR23, PRD FR-3, AD-1)
 
 **Acceptance Criteria:**
 
-**Given** a champion model
-**When** `POST /internal/mlops/retrain` is called
-**Then** a challenger is trained on the latest data in a background thread, and the endpoint returns 202 with a run id immediately
+**Given** a registered `champion` forecaster and valid `X-Internal-Token` authentication
+**When** `POST /internal/mlops/retrain` is called while no retrain job is active
+**Then** the service atomically acquires an in-process retrain lock, starts the plain-Python retrain coordinator (`ai-service/src/mlops/`) in a background thread without blocking the FastAPI event loop, and immediately returns HTTP 202 with `run_id`, `status: "running"`, and `started_at` in ISO 8601 UTC
 
-**Given** the challenger and the champion are scored on the same holdout set
-**When** the challenger's MAPE is lower
-**Then** it receives the `champion` alias and the service serves it without a restart
-**And** when it is not lower, the champion is kept
+**Given** a retrain job is already running
+**When** `POST /internal/mlops/retrain` is called again
+**Then** the endpoint immediately responds with HTTP 409 Conflict and does not start a second run
 
-**Given** any retrain attempt
-**When** it finishes
-**Then** a history record stores the timestamp, the trigger (`manual`), both MAPE values and the outcome (`promoted` or `rejected`)
+**Given** a retrain run executing on the latest dataset
+**When** the challenger is trained and compared against the current champion
+**Then** both models are evaluated on the same chronological holdout window positioned strictly after the training cutoff of both models (preventing temporal leakage)
+**And** both models are scored with an identical MAPE calculation that excludes zero-target (`y == 0`) rows and rejects non-finite (`NaN` or `Inf`) scores
 
-**Given** a retrain is already running
-**When** the endpoint is called again
-**Then** it responds 409
+**Given** both holdout MAPE scores are finite
+**When** `challenger_mape < champion_mape` (strictly lower)
+**Then** the coordinator verifies that the challenger artifact loads and produces a valid prediction before updating the MLflow `champion` alias under `.champion.lock` and calling `reset_serving_cache()` so the service serves the new champion without a restart
+**And** when `challenger_mape >= champion_mape`, the existing `champion` alias and in-memory serving model are kept unchanged with outcome `rejected`
+
+**Given** invalid or insufficient data, a missing/uncomparable champion, a non-finite MAPE score, or an error during training, alias promotion, or model reload
+**When** the retrain attempt aborts
+**Then** the existing usable `champion` remains active in serving, the run is recorded with outcome `failed` and a clear `reason`, and no broken model replaces the champion
+
+**Given** any retrain attempt (`promoted`, `rejected`, or `failed`)
+**When** the run reaches a terminal state
+**Then** the in-process retrain lock is always released in a `finally` block so future retrain requests are not blocked
+**And** a persisted history record stores `run_id`, `timestamp` (ISO 8601 UTC), `trigger` (`"manual"`), `champion_version`, `challenger_version`, `champion_mape`, `challenger_mape`, `outcome` (`"promoted"` | `"rejected"` | `"failed"`), and `reason` for Story 4.9 and Story 4.10 to reuse
 
 ### Story 4.9: Retrain automatically when the model degrades
 

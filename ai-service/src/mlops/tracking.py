@@ -144,6 +144,35 @@ def register_and_bootstrap_champion(
         return {"alias_set": False, "champion_version": existing_version}
 
 
+def promote_champion(
+    version: str,
+    name: str = REGISTERED_MODEL_NAME,
+    tracking_uri: Optional[str] = None,
+) -> str:
+    """
+    Assign the ``champion`` alias to ``version`` under the cross-process
+    ``.champion.lock`` (Story 4.8 — FR25 guarded promotion).
+    """
+    from filelock import FileLock
+    from mlflow.exceptions import MlflowException
+    from mlflow.tracking import MlflowClient
+
+    uri = configure(tracking_uri=tracking_uri)
+    lock = FileLock(str(_champion_lock_path(tracking_uri)))
+    with lock:
+        client = MlflowClient(tracking_uri=uri)
+        version = str(version)
+        try:
+            client.set_registered_model_alias(name, CHAMPION_ALIAS, version)
+        except MlflowException as exc:
+            raise ChampionArtifactError(
+                f"Could not promote version {version} to champion alias: {exc}",
+                version=version,
+            ) from exc
+        logger.info("Promoted %s version %s to %s alias.", name, version, CHAMPION_ALIAS)
+        return version
+
+
 def track_training_run(
     model: Any,
     params: Dict[str, Any],
@@ -153,6 +182,7 @@ def track_training_run(
     run_name: str = "train_models",
     tracking_uri: Optional[str] = None,
     artifact_location: Optional[str] = None,
+    bootstrap_champion: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """
     Log one completed XGBoost training run to MLflow and bootstrap the champion.
@@ -187,7 +217,13 @@ def track_training_run(
         model_version = mlflow.register_model(model_info.model_uri, REGISTERED_MODEL_NAME)
         version = str(model_version.version)
 
-    champion = register_and_bootstrap_champion(version, tracking_uri=tracking_uri)
+    if bootstrap_champion:
+        champion = register_and_bootstrap_champion(version, tracking_uri=tracking_uri)
+    else:
+        champion = {
+            "alias_set": False,
+            "champion_version": resolve_champion_version(tracking_uri=tracking_uri),
+        }
     summary = {
         "run_id": run_id,
         "version": version,

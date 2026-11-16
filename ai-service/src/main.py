@@ -21,7 +21,7 @@ if str(AI_SERVICE_DIR) not in sys.path:
 
 load_dotenv(AI_SERVICE_DIR / ".env")
 
-from src.api.routers import energy, forecast, anomalies, copilot
+from src.api.routers import energy, forecast, anomalies, copilot, mlops
 
 app = FastAPI(
     title="EcoTrack - Building Energy AI Engine",
@@ -58,6 +58,7 @@ app.include_router(energy.router)
 app.include_router(forecast.router)
 app.include_router(anomalies.router)
 app.include_router(copilot.router)
+app.include_router(mlops.router)
 
 
 @app.exception_handler(ServingDataError)
