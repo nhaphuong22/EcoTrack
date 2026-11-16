@@ -78,9 +78,9 @@ development_status:
   4-13-forecast-with-learned-prediction-intervals: backlog
   epic-4-retrospective: optional
 
-  epic-5: backlog
-  5-1-sign-in-with-a-role: backlog
-  5-2-stay-signed-in-and-sign-out: backlog
-  5-3-protect-operations-by-role-and-harden-the-gateway: backlog
-  5-4-sign-in-and-navigate-by-role: backlog
+  epic-5: done
+  5-1-sign-in-with-a-role: done
+  5-2-stay-signed-in-and-sign-out: done
+  5-3-protect-operations-by-role-and-harden-the-gateway: done
+  5-4-sign-in-and-navigate-by-role: done
   epic-5-retrospective: optional

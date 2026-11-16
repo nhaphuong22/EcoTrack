@@ -1,19 +1,27 @@
-import { useState, useCallback } from 'react';
-import { Bot, AlertCircle, LayoutDashboard, Map } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { Bot, AlertCircle, LayoutDashboard, Map, Cpu } from 'lucide-react';
 import Header from './components/layout/Header';
 import MetricCards from './components/dashboard/MetricCards';
 import ForecastChart from './components/dashboard/ForecastChart';
 import AnomalyTable from './components/dashboard/AnomalyTable';
 import FloorPlan from './components/dashboard/FloorPlan';
 import SystemStatus from './components/dashboard/SystemStatus';
+import MLOpsView from './components/dashboard/MLOpsView';
 import CopilotDrawer from './components/copilot/CopilotDrawer';
+import LoginPage from './components/auth/LoginPage';
 import { useEnergyData } from './hooks/useEnergyData';
 import { useCopilot } from './hooks/useCopilot';
 import { buildAnomalyPrompt, buildZonePrompt } from './lib/copilotPrompt';
 import { API_BASE_URL } from './services/api';
+import { getStoredAuth, logoutApi } from './services/auth';
 
 export default function App() {
-  const { metrics, timeSeries, anomalies, loading, error, refetch } = useEnergyData(168);
+  const [user, setUser] = useState(() => getStoredAuth().user);
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'floorplan' | 'mlops'
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Energy & Copilot hooks run only when authenticated
+  const { metrics, timeSeries, anomalies, loading, error, refetch } = useEnergyData(user ? 168 : 0);
   const {
     messages,
     isLoading: copilotLoading,
@@ -23,8 +31,31 @@ export default function App() {
     retry,
     clearHistory,
   } = useCopilot();
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'floorplan'
+
+  // Listen to silent refresh failure or external logout
+  useEffect(() => {
+    const handleLogoutEvent = () => setUser(null);
+    window.addEventListener('auth:logout', handleLogoutEvent);
+    return () => window.removeEventListener('auth:logout', handleLogoutEvent);
+  }, []);
+
+  // Ensure technician cannot stay on MLOps tab
+  useEffect(() => {
+    if (activeTab === 'mlops' && user?.role === 'TECHNICIAN') {
+      setActiveTab('dashboard');
+    }
+  }, [activeTab, user]);
+
+  const handleLoginSuccess = useCallback((loggedUser) => {
+    setUser(loggedUser);
+    setActiveTab('dashboard');
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    const { refreshToken } = getStoredAuth();
+    await logoutApi(refreshToken);
+    setUser(null);
+  }, []);
 
   const handleAskCopilot = useCallback((anomaly) => {
     const prompt = buildAnomalyPrompt(anomaly);
@@ -38,9 +69,21 @@ export default function App() {
     setDrawerOpen(true);
   }, [sendMessage]);
 
+  // If not signed in, show Login view
+  if (!user) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  const canAccessMLOps = user.role === 'ADMIN' || user.role === 'MANAGER';
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
-      <Header onRefresh={refetch} loading={loading} />
+      <Header
+        onRefresh={refetch}
+        loading={loading}
+        user={user}
+        onLogout={handleLogout}
+      />
 
       <main className="mx-auto max-w-screen-2xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
         {/* Navigation Tabs */}
@@ -74,6 +117,25 @@ export default function App() {
               Live
             </span>
           </button>
+
+          {/* MLOps Tab (Admin & Manager Only) */}
+          {canAccessMLOps && (
+            <button
+              id="tab-mlops"
+              onClick={() => setActiveTab('mlops')}
+              className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+                activeTab === 'mlops'
+                  ? 'bg-slate-800 text-violet-400 border border-slate-700 shadow-sm'
+                  : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+              }`}
+            >
+              <Cpu size={16} />
+              <span>Quản trị Mô hình & Drift</span>
+              <span className="rounded bg-violet-500/15 border border-violet-500/30 px-1.5 py-0.2 text-[10px] font-semibold text-violet-400">
+                MLOps
+              </span>
+            </button>
+          )}
         </div>
 
         {/* Error banner */}
@@ -87,7 +149,8 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === 'dashboard' ? (
+        {/* View based on activeTab */}
+        {activeTab === 'dashboard' && (
           <>
             {/* KPI Metric Cards */}
             <MetricCards metrics={metrics} />
@@ -109,8 +172,14 @@ export default function App() {
               <SystemStatus />
             </div>
           </>
-        ) : (
+        )}
+
+        {activeTab === 'floorplan' && (
           <FloorPlan onAskCopilot={handleAskCopilotZone} />
+        )}
+
+        {activeTab === 'mlops' && canAccessMLOps && (
+          <MLOpsView user={user} />
         )}
       </main>
 

@@ -59,7 +59,9 @@ describe('GET /api/v1/buildings/:id/zones', () => {
   });
 
   it('returns 200 with 10 zones and latest_reading for known building', async () => {
-    const res = await request(app).get('/api/v1/buildings/office_tower_01/zones');
+    const res = await request(app)
+      .get('/api/v1/buildings/office_tower_01/zones')
+      .set(global.authHeaderFor('MANAGER'));
 
     expect(res.status).toBe(200);
     expect(res.body.building_id).toBe('office_tower_01');
@@ -84,7 +86,9 @@ describe('GET /api/v1/buildings/:id/zones', () => {
   it('returns 404 with detail when building does not exist', async () => {
     mockPrisma.building.findUnique.mockResolvedValue(null);
 
-    const res = await request(app).get('/api/v1/buildings/unknown_id/zones');
+    const res = await request(app)
+      .get('/api/v1/buildings/unknown_id/zones')
+      .set(global.authHeaderFor('MANAGER'));
 
     expect(res.status).toBe(404);
     expect(res.body.detail).toContain('unknown_id');
