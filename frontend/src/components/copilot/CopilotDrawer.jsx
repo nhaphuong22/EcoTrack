@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, Send, Bot, Trash2, Loader2 } from 'lucide-react';
+import { X, Send, Bot, Trash2, Loader2, Square, RotateCcw } from 'lucide-react';
 import ChatMessage from './ChatMessage';
 import QuickPrompts from './QuickPrompts';
+
 export default function CopilotDrawer({
   isOpen,
   onClose,
@@ -9,11 +10,13 @@ export default function CopilotDrawer({
   isLoading = false,
   error = null,
   sendMessage,
+  stopStreaming,
+  retry,
   clearHistory,
 }) {
   const [input, setInput] = useState('');
   const bottomRef = useRef(null);
-  const inputRef  = useRef(null);
+  const inputRef = useRef(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -31,7 +34,10 @@ export default function CopilotDrawer({
   };
 
   const handleKey = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
   };
 
   return (
@@ -83,24 +89,50 @@ export default function CopilotDrawer({
 
         {/* Messages */}
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
-          {messages.map((m, i) => <ChatMessage key={i} message={m} />)}
+          {messages.map((m, i) => (
+            <ChatMessage key={i} message={m} />
+          ))}
 
-          {/* Typing indicator */}
+          {/* Typing indicator with Stop action */}
           {isLoading && (
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-500/20 text-sky-400">
-                <Bot size={15} />
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-500/20 text-sky-400">
+                  <Bot size={15} />
+                </div>
+                <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-sm border border-slate-700/60 bg-slate-800/80 px-4 py-2.5">
+                  <Loader2 size={14} className="animate-spin text-sky-400" />
+                  <span className="text-xs text-slate-400">Đang trả lời...</span>
+                </div>
               </div>
-              <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-sm border border-slate-700/60 bg-slate-800/80 px-4 py-2.5">
-                <Loader2 size={14} className="animate-spin text-sky-400" />
-                <span className="text-xs text-slate-400">Đang phân tích...</span>
-              </div>
+              {stopStreaming && (
+                <button
+                  id="copilot-stop-btn"
+                  onClick={stopStreaming}
+                  className="flex items-center gap-1 rounded-lg border border-rose-500/40 bg-rose-500/10 px-2.5 py-1 text-xs font-medium text-rose-400 transition hover:bg-rose-500/20"
+                  title="Dừng phản hồi"
+                >
+                  <Square size={11} className="fill-rose-400" />
+                  <span>Dừng</span>
+                </button>
+              )}
             </div>
           )}
 
+          {/* Error alert with Retry action */}
           {error && (
-            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2.5 text-xs text-rose-400">
-              {error}
+            <div className="flex items-center justify-between rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2.5 text-xs text-rose-400">
+              <span>{error}</span>
+              {retry && (
+                <button
+                  id="copilot-retry-btn"
+                  onClick={retry}
+                  className="flex items-center gap-1 font-semibold text-rose-300 hover:text-white underline ml-2"
+                >
+                  <RotateCcw size={12} />
+                  <span>Thử lại</span>
+                </button>
+              )}
             </div>
           )}
           <div ref={bottomRef} />
@@ -108,7 +140,13 @@ export default function CopilotDrawer({
 
         {/* Quick prompts + input */}
         <div className="border-t border-slate-700/60 px-5 py-4 space-y-3 bg-slate-900/80">
-          <QuickPrompts onSelect={(msg) => { setInput(''); sendMessage(msg); }} disabled={isLoading} />
+          <QuickPrompts
+            onSelect={(msg) => {
+              setInput('');
+              sendMessage(msg);
+            }}
+            disabled={isLoading}
+          />
 
           <div className="flex gap-2">
             <textarea
@@ -116,21 +154,32 @@ export default function CopilotDrawer({
               id="copilot-input"
               rows={2}
               value={input}
-              onChange={e => setInput(e.target.value)}
+              onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKey}
               disabled={isLoading}
               placeholder="Nhập câu hỏi về năng lượng... (Enter để gửi)"
               className="flex-1 resize-none rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 outline-none transition focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 disabled:opacity-50"
             />
-            <button
-              id="copilot-send-btn"
-              onClick={handleSend}
-              disabled={isLoading || !input.trim()}
-              className="flex flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 px-4 text-white shadow-lg shadow-emerald-500/20 transition hover:from-emerald-400 hover:to-teal-500 disabled:opacity-40"
-              title="Gửi (Enter)"
-            >
-              {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-            </button>
+            {isLoading && stopStreaming ? (
+              <button
+                id="copilot-stop-input-btn"
+                onClick={stopStreaming}
+                className="flex flex-shrink-0 items-center justify-center rounded-xl bg-rose-600 px-4 text-white shadow-lg shadow-rose-600/20 transition hover:bg-rose-500"
+                title="Dừng tạo phản hồi"
+              >
+                <Square size={16} className="fill-white" />
+              </button>
+            ) : (
+              <button
+                id="copilot-send-btn"
+                onClick={handleSend}
+                disabled={isLoading || !input.trim()}
+                className="flex flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 px-4 text-white shadow-lg shadow-emerald-500/20 transition hover:from-emerald-400 hover:to-teal-500 disabled:opacity-40"
+                title="Gửi (Enter)"
+              >
+                <Send size={18} />
+              </button>
+            )}
           </div>
         </div>
       </aside>

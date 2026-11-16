@@ -22,7 +22,15 @@ export default function App() {
 
   // Energy & Copilot hooks run only when authenticated
   const { metrics, timeSeries, anomalies, loading, error, refetch } = useEnergyData(user ? 168 : 0);
-  const { messages, isLoading: copilotLoading, error: copilotError, sendMessage, clearHistory } = useCopilot();
+  const {
+    messages,
+    isLoading: copilotLoading,
+    error: copilotError,
+    sendMessage,
+    stopStreaming,
+    retry,
+    clearHistory,
+  } = useCopilot();
 
   // Listen to silent refresh failure or external logout
   useEffect(() => {
@@ -198,6 +206,8 @@ export default function App() {
         isLoading={copilotLoading}
         error={copilotError}
         sendMessage={sendMessage}
+        stopStreaming={stopStreaming}
+        retry={retry}
         clearHistory={clearHistory}
       />
     </div>
