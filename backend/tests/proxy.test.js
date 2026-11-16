@@ -8,7 +8,9 @@ describe('Express Proxy Routes with Mocked Fetch', () => {
 
   beforeEach(() => {
     // Clear cache before each test
-    request(app).post('/api/v1/energy/cache/clear');
+    request(app)
+      .post('/api/v1/energy/cache/clear')
+      .set(global.authHeaderFor('ADMIN'));
     vi.spyOn(prisma.conversation, 'createMany').mockResolvedValue({ count: 2 });
   });
 
@@ -30,7 +32,9 @@ describe('Express Proxy Routes with Mocked Fetch', () => {
       json: async () => mockForecast,
     });
 
-    const res = await request(app).get('/api/v1/forecast/predict');
+    const res = await request(app)
+      .get('/api/v1/forecast/predict')
+      .set(global.authHeaderFor('ADMIN'));
     expect(res.status).toBe(200);
     expect(res.body.building_id).toBe('office_tower_01');
     expect(res.body.forecast[0].predicted_kwh).toBe(155.0);
@@ -58,16 +62,22 @@ describe('Express Proxy Routes with Mocked Fetch', () => {
     });
 
     // Clear cache first
-    await request(app).post('/api/v1/energy/cache/clear');
+    await request(app)
+      .post('/api/v1/energy/cache/clear')
+      .set(global.authHeaderFor('ADMIN'));
 
     // First request -> MISS
-    const res1 = await request(app).get('/api/v1/energy/metrics');
+    const res1 = await request(app)
+      .get('/api/v1/energy/metrics')
+      .set(global.authHeaderFor('ADMIN'));
     expect(res1.status).toBe(200);
     expect(res1.headers['x-cache']).toBe('MISS');
     expect(res1.body.total_consumption_kwh).toBe(50000);
 
     // Second request -> HIT (should not call fetch again)
-    const res2 = await request(app).get('/api/v1/energy/metrics');
+    const res2 = await request(app)
+      .get('/api/v1/energy/metrics')
+      .set(global.authHeaderFor('ADMIN'));
     expect(res2.status).toBe(200);
     expect(res2.headers['x-cache']).toBe('HIT');
     expect(global.fetch).toHaveBeenCalledTimes(1);
@@ -87,6 +97,7 @@ describe('Express Proxy Routes with Mocked Fetch', () => {
 
     const res = await request(app)
       .post('/api/v1/copilot/chat')
+      .set(global.authHeaderFor('ADMIN'))
       .send({
         message: 'Tình trạng HVAC thế nào?',
         building_id: 'office_tower_01',
