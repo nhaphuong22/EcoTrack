@@ -83,7 +83,7 @@ class TestCopilotRAGAndMultiTurn:
         reply, tools_called, sources, engine = orch.process_chat("Chỉ số tổng quan năng lượng")
         assert engine == "heuristic"
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_story_3_4_streaming_event_sequence(self):
         """Story 3.4: Streaming yields token, sources, and done events."""
         orch = CopilotOrchestrator()
