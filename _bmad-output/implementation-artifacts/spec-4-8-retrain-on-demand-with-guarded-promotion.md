@@ -44,6 +44,7 @@ context: []
   - Added `clear_champion_alias()` (under `.champion.lock`), `get_champion_tag()`, and optional `tags` on `track_training_run()` in `ai-service/src/mlops/tracking.py`; recorded and enforced `train_end_timestamp` against holdout start to prevent champion-vs-challenger temporal leakage.
   - Added `_history_lock`, corrupt history backup (`.corrupt.*.bak`), strict `allow_nan=False` JSON writes, corrupt `model_metadata.json` failure guard, `train_ratio` range check `(0, 1)`, `_execute_retrain_locked` separation (removing `_lock_already_held` from `run_retrain`), and `history_persisted: False` surfacing on history write errors.
   - Closed verification gaps in `test_mlops_retrain.py` and `test_mlops_tracking.py`: real end-to-end XGBoost retraining + `GET /internal/forecast/predict` hot-reload test, real `promote_champion` + `reset_serving_cache` rollback tests (both MLflow v1 and `local` fallback), newest-first `run_id` history ordering assertion, temporal-leakage boundary & champion-cutoff tests, corrupt file guards, and `promote_champion` `ChampionArtifactError` test.
+- Owner ran `pytest tests/test_mlops_retrain.py tests/test_mlops_tracking.py -q` (2026-11-17): `13 passed, 1 warning in 156.31s` (pre-existing MLflow `SADeprecationWarning` on SQLAlchemy `noload`).
 
 ## Review Triage Log — `bmad-review` pass (2026-11-17)
 
