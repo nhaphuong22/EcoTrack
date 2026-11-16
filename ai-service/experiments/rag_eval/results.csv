@@ -1,0 +1,3 @@
+id,question,expected_source,hit_at_3,reciprocal_rank,top_source_retrieved,top_score
+1,Giá điện EVN giờ cao điểm?,evn_tariffs_commercial.md,1,1.0,evn_tariffs_commercial,0.9089
+2,Pre-cooling là gì?,evn_peak_shaving.md,1,0.5,qcvn_09_2017_general,0.8303
