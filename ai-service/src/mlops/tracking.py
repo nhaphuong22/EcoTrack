@@ -173,6 +173,53 @@ def promote_champion(
         return version
 
 
+def clear_champion_alias(
+    name: str = REGISTERED_MODEL_NAME,
+    tracking_uri: Optional[str] = None,
+) -> None:
+    """
+    Remove the ``champion`` alias under ``.champion.lock`` (used when rolling back
+    a promotion that had no prior MLflow champion alias).
+    """
+    from filelock import FileLock
+    from mlflow.exceptions import MlflowException
+    from mlflow.tracking import MlflowClient
+
+    uri = configure(tracking_uri=tracking_uri)
+    lock = FileLock(str(_champion_lock_path(tracking_uri)))
+    with lock:
+        client = MlflowClient(tracking_uri=uri)
+        try:
+            client.delete_registered_model_alias(name, CHAMPION_ALIAS)
+        except MlflowException as exc:
+            if not _is_not_found(exc):
+                raise ChampionArtifactError(
+                    f"Could not clear champion alias: {exc}"
+                ) from exc
+
+
+def get_champion_tag(
+    tag_key: str,
+    name: str = REGISTERED_MODEL_NAME,
+    tracking_uri: Optional[str] = None,
+) -> Optional[str]:
+    """Read a tag from the MLflow run backing the current ``champion`` alias, or None."""
+    if mlflow_disabled() or not is_mlflow_initialised(tracking_uri):
+        return None
+    try:
+        from mlflow.tracking import MlflowClient
+
+        uri = configure(tracking_uri=tracking_uri)
+        client = MlflowClient(tracking_uri=uri)
+        mv = client.get_model_version_by_alias(name, CHAMPION_ALIAS)
+        if not mv.run_id:
+            return None
+        run = client.get_run(mv.run_id)
+        return run.data.tags.get(tag_key)
+    except Exception:
+        return None
+
+
 def track_training_run(
     model: Any,
     params: Dict[str, Any],
@@ -183,6 +230,7 @@ def track_training_run(
     tracking_uri: Optional[str] = None,
     artifact_location: Optional[str] = None,
     bootstrap_champion: bool = True,
+    tags: Optional[Dict[str, str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Log one completed XGBoost training run to MLflow and bootstrap the champion.
@@ -212,6 +260,8 @@ def track_training_run(
         if numeric_metrics:
             mlflow.log_metrics(numeric_metrics)
         mlflow.set_tag("xgb_features", json.dumps(list(features)))
+        if tags:
+            mlflow.set_tags({str(k): str(v) for k, v in tags.items()})
 
         model_info = mlflow.xgboost.log_model(model, artifact_path="model")
         model_version = mlflow.register_model(model_info.model_uri, REGISTERED_MODEL_NAME)

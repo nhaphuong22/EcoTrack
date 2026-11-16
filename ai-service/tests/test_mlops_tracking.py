@@ -21,7 +21,11 @@ from src.mlops import config as mlops_config
 from src.mlops.tracking import (
     CHAMPION_ALIAS,
     REGISTERED_MODEL_NAME,
+    ChampionArtifactError,
+    clear_champion_alias,
+    promote_champion,
     register_and_bootstrap_champion,
+    resolve_champion_version,
     track_training_run,
 )
 from src.models.train_models import (
@@ -162,3 +166,16 @@ def test_run_pipeline_logs_run_and_bootstraps_champion(temp_store, tmp_path):
     # models_saved/ artifacts still written as the fallback source of truth.
     assert (models_dir / "xgboost_forecaster.joblib").exists()
     assert (models_dir / "model_metadata.json").exists()
+
+
+def test_promote_champion_translates_mlflow_error_and_clear_alias(temp_store):
+    model, params, metrics, row_counts = _tiny_trained()
+    first = track_training_run(model, params, metrics, XGB_FEATURE_COLUMNS, row_counts)
+    assert first is not None and first["champion_version"] == "1"
+
+    with pytest.raises(ChampionArtifactError) as exc_info:
+        promote_champion("999")
+    assert exc_info.value.version == "999"
+
+    clear_champion_alias()
+    assert resolve_champion_version() is None

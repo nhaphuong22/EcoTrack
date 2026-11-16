@@ -38,7 +38,27 @@ context: []
 - Created `ai-service/tests/test_mlops_retrain.py` covering zero/non-finite holdout MAPE handling, guarded promotion + hot-reload cache invalidation + metadata preservation, equal/worse rejection, missing data / missing champion / non-finite challenger / probe failure / alias rollback + lock release, and `202`/`409`/`401` on `POST /internal/mlops/retrain`.
 - Per the Epic 4 working agreement, the agent verified bytecode compilation (`python -m py_compile`) without executing `pytest` (since `conftest.py`'s session fixture trains models); command for the project owner to run:
   - Working directory: `c:\Users\ADMIN\Desktop\EcoTrack\ai-service`
-  - Command: `pytest tests/test_mlops_retrain.py -q`
+  - Command: `pytest tests/test_mlops_retrain.py tests/test_mlops_tracking.py -q`
+- Post-`bmad-review` hardening (2026-11-17):
+  - Switched `serving_frame._lock` to `threading.RLock()` and wrapped `_verify_and_promote_challenger`'s disk swap + MLflow alias promotion + `reset_serving_cache()` inside `with serving_frame._lock:`, snapshotting and restoring `xgboost_forecaster.joblib` and `model_metadata.json` on any promotion/cache failure.
+  - Added `clear_champion_alias()` (under `.champion.lock`), `get_champion_tag()`, and optional `tags` on `track_training_run()` in `ai-service/src/mlops/tracking.py`; recorded and enforced `train_end_timestamp` against holdout start to prevent champion-vs-challenger temporal leakage.
+  - Added `_history_lock`, corrupt history backup (`.corrupt.*.bak`), strict `allow_nan=False` JSON writes, corrupt `model_metadata.json` failure guard, `train_ratio` range check `(0, 1)`, `_execute_retrain_locked` separation (removing `_lock_already_held` from `run_retrain`), and `history_persisted: False` surfacing on history write errors.
+  - Closed verification gaps in `test_mlops_retrain.py` and `test_mlops_tracking.py`: real end-to-end XGBoost retraining + `GET /internal/forecast/predict` hot-reload test, real `promote_champion` + `reset_serving_cache` rollback tests (both MLflow v1 and `local` fallback), newest-first `run_id` history ordering assertion, temporal-leakage boundary & champion-cutoff tests, corrupt file guards, and `promote_champion` `ChampionArtifactError` test.
+
+## Review Triage Log — `bmad-review` pass (2026-11-17)
+
+Sequential 3-lens review (`adversarial` [13], `edge-case-hunter` [9], `verification-gap` [7]) against commit `1d50862`.
+
+| # | Lens | Finding | Route | Resolution |
+|---|------|---------|-------|------------|
+| 1 | adversarial / edge-case / verification | Disk artifacts overwritten before `promote_champion` were not rolled back on failure, and `test_mlops_retrain.py` only mocked `_update_local_artifacts_atomically` so the rollback block never ran | patch | Snapshotted `xgboost_forecaster.joblib` + `model_metadata.json` before swap and restored both on error; added `promote_champion` failure and `reset_serving_cache` failure rollback tests (both v1 and `local`). |
+| 2 | adversarial / edge-case / verification | `_verify_and_promote_challenger` lacked `serving_frame._lock` around swap + alias switch + cache clear; hot-reload test checked only `_cached_xgb_model is None` | patch | Changed `serving_frame._lock` to `RLock()`, locked the transition block, and added an end-to-end `GET /internal/forecast/predict` before/after hot-reload test. |
+| 3 | adversarial / edge-case / verification | No champion `train_end_timestamp` cutoff check or boundary-duplicate test | patch | Persisted `train_end_timestamp` in `model_metadata.json` and MLflow run tags (`get_champion_tag`); rejected overlapping champion cutoff or duplicate split timestamps, with dedicated tests. |
+| 4 | adversarial / edge-case | Corrupt `retrain_history.json` and `model_metadata.json` were silently clobbered; concurrent history read/write lacked lock; JSON lacked `allow_nan=False` | patch | Added `_history_lock`, backed up corrupt history to `.corrupt.*.bak`, raised on corrupt `model_metadata.json`, and enabled `allow_nan=False`. |
+| 5 | adversarial / edge-case | `run_retrain` exposed `_lock_already_held`, accepted negative `train_ratio`, swallowed `_append_history` errors silently, and rounded MAPE to 4 decimals | patch | Extracted `_execute_retrain_locked`, enforced `0 < train_ratio < 1`, surfaced `history_persisted: False` on error, and rounded history MAPE to 6 decimals. |
+| 6 | adversarial / edge-case | `champion_version == "local"` rollback deleted alias outside `.champion.lock` | patch | Added `clear_champion_alias()` under `.champion.lock` in `tracking.py`. |
+| 7 | verification-gap | All tests mocked `_train_challenger`; history newest-first ordering and `promote_champion` error translation were untested | patch | Added unmocked `train_xgboost_forecaster` integration test, distinct-`run_id` ordering assertion, and `test_promote_champion_translates_mlflow_error_and_clear_alias`. |
+| 8 | adversarial | `run_retrain` initializes `mlruns/mlflow.db` when `ECOTRACK_DISABLE_MLFLOW` is unset even on local-only runs; `_train_challenger` uses `train_xgboost_forecaster` (`n_jobs=-1`) | reject | Matches Story 4.5's `train_models.py` convention (`ECOTRACK_DISABLE_MLFLOW=1` is the explicit opt-out); avoided altering `train_models.py` without measured CPU contention (`/ponytail ultra`). |
 
 ## Review Triage Log
 

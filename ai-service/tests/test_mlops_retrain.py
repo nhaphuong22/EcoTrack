@@ -3,10 +3,13 @@ Retrain-on-demand and guarded-promotion tests for Story 4.8 (FR25).
 
 Covers:
   - Holdout MAPE helper (zero-target filtering, NaN/Inf rejection)
-  - Guarded promotion when challenger_mape < champion_mape (MLflow alias switch,
-    atomic metadata preservation, and serving-cache invalidation)
+  - End-to-end real XGBoost retraining + MLflow tracking + guarded promotion +
+    hot-reload on GET /internal/forecast/predict without restart
   - Rejection when challenger_mape >= champion_mape (equal or worse keeps champion)
-  - Operational failure handling + alias rollback + guaranteed lock release in finally
+  - Operational failure handling + MLflow alias and disk artifact rollback +
+    guaranteed lock release in finally
+  - Temporal-leakage guards (boundary duplicate & champion cutoff overlap),
+    corrupt metadata/history handling, newest-first history ordering, and train_ratio bounds
   - HTTP endpoint POST /internal/mlops/retrain (202 Accepted, 409 Conflict when
     concurrent, 401 Unauthorized without valid X-Internal-Token)
 """
@@ -14,6 +17,7 @@ Covers:
 from __future__ import annotations
 
 import json
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -25,21 +29,25 @@ import pytest
 from fastapi.testclient import TestClient
 
 mlflow = pytest.importorskip("mlflow")
-from mlflow.tracking import MlflowClient
 
 from src.data_pipeline import serving_frame
 from src.main import app
 from src.mlops import retrain as retrain_mod
-from src.mlops.config import CHAMPION_ALIAS, REGISTERED_MODEL_NAME
 from src.mlops.retrain import (
     RetrainAlreadyRunningError,
     compute_holdout_mape,
     is_retrain_running,
     load_retrain_history,
     run_retrain,
+    start_retrain,
 )
-from src.mlops.tracking import load_champion_forecaster, track_training_run
+from src.mlops.tracking import (
+    load_champion_forecaster,
+    resolve_champion_version,
+    track_training_run,
+)
 from src.models.train_models import (
+    ISO_FEATURE_COLUMNS,
     XGB_FEATURE_COLUMNS,
     engineer_features,
     load_dataset,
@@ -68,13 +76,26 @@ class ConstantOffsetForecaster:
         return np.asarray(X["lag_1h"], dtype=float) * self.scale + self.offset
 
 
+@pytest.fixture(autouse=True)
+def clean_serving_cache():
+    serving_frame.reset_serving_cache()
+    yield
+    serving_frame.reset_serving_cache()
+
+
 @pytest.fixture
-def temp_mlflow_env(tmp_path, monkeypatch):
-    """Isolated MLflow SQLite store + temp models_dir."""
+def temp_mlflow_env(tmp_path, monkeypatch, setup_test_environment):
+    """Isolated MLflow SQLite store + temp models_dir seeded with serving artifacts."""
     db = tmp_path / "mlflow.db"
     artifacts = tmp_path / "artifacts"
     models_dir = tmp_path / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy baseline isolation_forest.joblib and model_metadata.json from session fixture
+    # so end-to-end serving calls (/internal/forecast/predict) work inside temp_mlflow_env.
+    base_models = setup_test_environment["models_dir"]
+    shutil.copy2(base_models / "isolation_forest.joblib", models_dir / "isolation_forest.joblib")
+    shutil.copy2(base_models / "model_metadata.json", models_dir / "model_metadata.json")
 
     monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{db.as_posix()}")
     monkeypatch.setenv("MLFLOW_ARTIFACT_ROOT", str(artifacts.as_posix()))
@@ -109,12 +130,14 @@ def test_compute_holdout_mape_filters_zeros_and_rejects_non_finite():
         compute_holdout_mape(np.array([100.0, 200.0]), np.array([100.0, np.inf]))
 
 
-def test_run_retrain_promotes_strictly_better_challenger_and_hot_reloads(temp_mlflow_env, monkeypatch):
+def test_run_retrain_real_training_promotes_and_hot_reloads_forecast_endpoint(temp_mlflow_env):
+    """End-to-end without monkeypatching _train_challenger: real XGBoost training beats
+    a weak seed champion and GET /internal/forecast/predict serves the new champion immediately."""
     models_dir = temp_mlflow_env["models_dir"]
     df = engineer_features(load_dataset(FIXTURE_CSV))
     train_df, test_df = split_time_series_data(df, train_ratio=0.8)
 
-    # Seed a degraded champion (v1) trained on scaled targets so its holdout MAPE is high.
+    # Seed a degraded champion (v1) trained on scaled-down targets.
     bad_champion = _fit_tiny_xgb(train_df, max_depth=2, scale_target=0.5)
     boot = track_training_run(
         model=bad_champion,
@@ -122,25 +145,24 @@ def test_run_retrain_promotes_strictly_better_challenger_and_hot_reloads(temp_ml
         metrics={"mape_percent": 50.0, "rmse_kwh": 90.0},
         features=list(XGB_FEATURE_COLUMNS),
         row_counts={"dataset_rows": len(df), "train_rows": len(train_df), "test_rows": len(test_df)},
-        run_name="seed_champion",
+        run_name="seed_weak_champion",
     )
     assert boot is not None and boot["champion_version"] == "1"
     joblib.dump(bad_champion, models_dir / "xgboost_forecaster.joblib")
-    (models_dir / "model_metadata.json").write_text(
-        json.dumps({"isolation_forest_quality": {"scenario_hvac_overrun": {"f1": 0.88}}}),
-        encoding="utf-8",
-    )
 
-    good_challenger = _fit_tiny_xgb(train_df, max_depth=3, scale_target=1.0)
-    monkeypatch.setattr(
-        retrain_mod,
-        "_train_challenger",
-        lambda tr, te: (good_challenger, {"rmse_kwh": 12.3, "mae_kwh": 9.1, "r2_score": 0.91, "target_mape_met": True}),
-    )
+    # Preserve Story 4.7 key inside model_metadata.json alongside existing isolation_forest keys.
+    meta_path = models_dir / "model_metadata.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["isolation_forest_quality"] = {"scenario_hvac_overrun": {"f1": 0.88}}
+    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
-    # Prime the serving cache so we can verify reset_serving_cache() clears it on promotion.
-    serving_frame._cached_xgb_model = bad_champion
+    # Warm serving cache through the real FastAPI forecast endpoint before retrain.
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+    before_res = client.get("/internal/forecast/predict")
+    assert before_res.status_code == 200
+    before_preds = [pt["predicted_kwh"] for pt in before_res.json()["forecast"]]
 
+    # Run real retrain (no _train_challenger mock).
     record = run_retrain(trigger="manual", data_path=FIXTURE_CSV, models_dir=models_dir)
 
     assert record["outcome"] == "promoted"
@@ -151,15 +173,21 @@ def test_run_retrain_promotes_strictly_better_challenger_and_hot_reloads(temp_ml
     assert record["timestamp"].endswith("Z")
     assert not is_retrain_running()
 
-    # MLflow champion alias now points at v2 and serving cache was invalidated.
     _, active_version = load_champion_forecaster()
     assert active_version == "2"
-    assert serving_frame._cached_xgb_model is None
 
-    # Metadata updated while preserving Story 4.7's isolation_forest_quality key.
-    meta = json.loads((models_dir / "model_metadata.json").read_text(encoding="utf-8"))
-    assert meta["isolation_forest_quality"]["scenario_hvac_overrun"]["f1"] == 0.88
-    assert meta["xgboost_metrics"]["mape_percent"] == pytest.approx(record["challenger_mape"], abs=0.05)
+    # Metadata keeps isolation_forest_quality + iso_features and records train_end_timestamp.
+    updated_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert updated_meta["isolation_forest_quality"]["scenario_hvac_overrun"]["f1"] == 0.88
+    assert updated_meta["iso_features"] == ISO_FEATURE_COLUMNS
+    assert updated_meta["train_end_timestamp"]
+    assert updated_meta["xgboost_metrics"]["mape_percent"] == pytest.approx(record["challenger_mape"], abs=0.01)
+
+    # Forecast endpoint serves the promoted champion without restarting the app.
+    after_res = client.get("/internal/forecast/predict")
+    assert after_res.status_code == 200
+    after_preds = [pt["predicted_kwh"] for pt in after_res.json()["forecast"]]
+    assert after_preds != before_preds
 
     history = load_retrain_history(models_dir)
     assert len(history) == 1
@@ -167,7 +195,9 @@ def test_run_retrain_promotes_strictly_better_challenger_and_hot_reloads(temp_ml
     assert history[0]["outcome"] == "promoted"
 
 
-def test_run_retrain_rejects_equal_or_worse_challenger_and_keeps_champion(temp_mlflow_env, monkeypatch):
+def test_run_retrain_rejects_equal_or_worse_challenger_and_preserves_newest_first_history(
+    temp_mlflow_env, monkeypatch
+):
     models_dir = temp_mlflow_env["models_dir"]
     df = engineer_features(load_dataset(FIXTURE_CSV))
     train_df, test_df = split_time_series_data(df, train_ratio=0.8)
@@ -193,12 +223,12 @@ def test_run_retrain_rejects_equal_or_worse_challenger_and_keeps_champion(temp_m
 
     rec_equal = run_retrain(trigger="manual", data_path=FIXTURE_CSV, models_dir=models_dir)
     assert rec_equal["outcome"] == "rejected"
-    assert rec_equal["challenger_mape"] == pytest.approx(rec_equal["champion_mape"])
+    assert rec_equal["challenger_mape"] == pytest.approx(rec_equal["champion_mape"], abs=1e-5)
     assert serving_frame._cached_xgb_model is strong_champion
     _, active_version = load_champion_forecaster()
     assert active_version == "1"
 
-    # Case 2: Worse MAPE -> rejected.
+    # Case 2: Worse MAPE -> rejected; verify newest-first ordering via distinct run_ids.
     worse_challenger = _fit_tiny_xgb(train_df, max_depth=2, scale_target=0.5)
     monkeypatch.setattr(
         retrain_mod,
@@ -212,10 +242,12 @@ def test_run_retrain_rejects_equal_or_worse_challenger_and_keeps_champion(temp_m
     assert active_version == "1"
 
     history = load_retrain_history(models_dir)
-    assert [h["outcome"] for h in history] == ["rejected", "rejected"]
+    assert [h["run_id"] for h in history] == [rec_worse["run_id"], rec_equal["run_id"]]
 
 
-def test_run_retrain_failure_keeps_champion_rolls_back_alias_and_releases_lock(temp_mlflow_env, monkeypatch):
+def test_run_retrain_rollback_restores_disk_and_mlflow_alias_and_releases_lock(
+    temp_mlflow_env, monkeypatch
+):
     models_dir = temp_mlflow_env["models_dir"]
     df = engineer_features(load_dataset(FIXTURE_CSV))
     train_df, test_df = split_time_series_data(df, train_ratio=0.8)
@@ -228,7 +260,11 @@ def test_run_retrain_failure_keeps_champion_rolls_back_alias_and_releases_lock(t
         features=list(XGB_FEATURE_COLUMNS),
         row_counts={"dataset_rows": len(df), "train_rows": len(train_df), "test_rows": len(test_df)},
     )
-    joblib.dump(bad_champion, models_dir / "xgboost_forecaster.joblib")
+    xgb_path = models_dir / "xgboost_forecaster.joblib"
+    meta_path = models_dir / "model_metadata.json"
+    joblib.dump(bad_champion, xgb_path)
+    orig_xgb_bytes = xgb_path.read_bytes()
+    orig_meta_bytes = meta_path.read_bytes()
 
     # Failure 1: Missing dataset -> outcome == "failed", lock released.
     rec_missing = run_retrain(
@@ -240,7 +276,6 @@ def test_run_retrain_failure_keeps_champion_rolls_back_alias_and_releases_lock(t
     assert "not found" in (rec_missing["reason"] or "").lower()
     assert not is_retrain_running()
 
-    # Failure 2: Local artifact swap fails AFTER MLflow alias promotion -> rolls back alias to v1.
     good_challenger = _fit_tiny_xgb(train_df, max_depth=3, scale_target=1.0)
     monkeypatch.setattr(
         retrain_mod,
@@ -248,19 +283,27 @@ def test_run_retrain_failure_keeps_champion_rolls_back_alias_and_releases_lock(t
         lambda tr, te: (good_challenger, {"rmse_kwh": 12.0, "mae_kwh": 9.0, "r2_score": 0.9, "target_mape_met": True}),
     )
 
-    def _boom(*args, **kwargs):
-        raise RuntimeError("Simulated disk write failure during artifact swap")
-
-    monkeypatch.setattr(retrain_mod, "_update_local_artifacts_atomically", _boom)
-
-    rec_rollback = run_retrain(trigger="manual", data_path=FIXTURE_CSV, models_dir=models_dir)
-    assert rec_rollback["outcome"] == "failed"
-    assert "Simulated disk write failure" in (rec_rollback["reason"] or "")
+    # Failure 2: promote_champion fails AFTER disk swap -> restores disk artifacts, keeps MLflow v1.
+    with monkeypatch.context() as m:
+        m.setattr(retrain_mod, "promote_champion", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("MLflow alias locked")))
+        rec_promote_err = run_retrain(trigger="manual", data_path=FIXTURE_CSV, models_dir=models_dir)
+    assert rec_promote_err["outcome"] == "failed"
+    assert "MLflow alias locked" in (rec_promote_err["reason"] or "")
+    assert xgb_path.read_bytes() == orig_xgb_bytes
+    assert meta_path.read_bytes() == orig_meta_bytes
     assert not is_retrain_running()
 
-    # Champion alias remains on version "1".
+    # Failure 3: reset_serving_cache fails AFTER promote_champion switched alias -> rolls back BOTH MLflow alias to v1 AND disk files.
+    with monkeypatch.context() as m:
+        m.setattr(serving_frame, "reset_serving_cache", lambda: (_ for _ in ()).throw(RuntimeError("Cache reset boom")))
+        rec_cache_err = run_retrain(trigger="manual", data_path=FIXTURE_CSV, models_dir=models_dir)
+    assert rec_cache_err["outcome"] == "failed"
+    assert "Cache reset boom" in (rec_cache_err["reason"] or "")
+    assert xgb_path.read_bytes() == orig_xgb_bytes
+    assert meta_path.read_bytes() == orig_meta_bytes
     _, active_version = load_champion_forecaster()
     assert active_version == "1"
+    assert not is_retrain_running()
 
 
 def test_run_retrain_handles_missing_champion_non_finite_challenger_and_probe_failure(
@@ -278,7 +321,9 @@ def test_run_retrain_handles_missing_champion_non_finite_challenger_and_probe_fa
     df = engineer_features(load_dataset(FIXTURE_CSV))
     train_df, test_df = split_time_series_data(df, train_ratio=0.8)
     seed_champ = _fit_tiny_xgb(train_df, max_depth=2, scale_target=0.5)
-    joblib.dump(seed_champ, models_dir / "xgboost_forecaster.joblib")
+    xgb_path = models_dir / "xgboost_forecaster.joblib"
+    joblib.dump(seed_champ, xgb_path)
+    orig_xgb_bytes = xgb_path.read_bytes()
 
     # 2. Challenger produces NaN predictions -> outcome == "failed", MLflow does NOT bootstrap alias.
     class _NaNForecaster:
@@ -295,8 +340,7 @@ def test_run_retrain_handles_missing_champion_non_finite_challenger_and_probe_fa
     assert "non-finite" in (rec_nan["reason"] or "").lower()
     assert not is_retrain_running()
 
-    # 3. Rejected challenger when no prior MLflow champion alias exists (champion_version == "local")
-    # must NOT accidentally set the MLflow champion alias via bootstrap_champion.
+    # 3. Rejected challenger when champion_version == "local" must NOT claim MLflow champion alias.
     worse_challenger = _fit_tiny_xgb(train_df, max_depth=2, scale_target=0.2)
     monkeypatch.setattr(
         retrain_mod,
@@ -306,8 +350,6 @@ def test_run_retrain_handles_missing_champion_non_finite_challenger_and_probe_fa
     rec_local_reject = run_retrain(trigger="drift", signals=["meter_reading"], data_path=FIXTURE_CSV, models_dir=models_dir)
     assert rec_local_reject["outcome"] == "rejected"
     assert rec_local_reject["signals"] == ["meter_reading"]
-    from src.mlops.tracking import resolve_champion_version
-
     assert resolve_champion_version() is None
 
     # 4. Probe failure inside _verify_and_promote_challenger aborts before promote_champion is called.
@@ -318,18 +360,94 @@ def test_run_retrain_handles_missing_champion_non_finite_challenger_and_probe_fa
         lambda tr, te: (good_challenger, {"rmse_kwh": 10.0, "mae_kwh": 8.0, "r2_score": 0.9, "target_mape_met": True}),
     )
     promote_called = []
-    monkeypatch.setattr(retrain_mod, "promote_champion", lambda *a, **kw: promote_called.append(True))
+    with monkeypatch.context() as m:
+        m.setattr(retrain_mod, "promote_champion", lambda *a, **kw: promote_called.append(True))
 
-    class _NaNProbeModel:
-        def predict(self, X):
-            return np.array([np.nan])
+        class _NaNProbeModel:
+            def predict(self, X):
+                return np.array([np.nan])
 
-    monkeypatch.setattr(mlflow.xgboost, "load_model", lambda uri: _NaNProbeModel())
-    rec_probe_fail = run_retrain(trigger="manual", data_path=FIXTURE_CSV, models_dir=models_dir)
+        m.setattr(mlflow.xgboost, "load_model", lambda uri: _NaNProbeModel())
+        rec_probe_fail = run_retrain(trigger="manual", data_path=FIXTURE_CSV, models_dir=models_dir)
     assert rec_probe_fail["outcome"] == "failed"
     assert "non-finite probe" in (rec_probe_fail["reason"] or "").lower()
     assert promote_called == []
     assert not is_retrain_running()
+
+    # 5. Failure after promote_champion when champion_version == "local" clears the newly set MLflow alias & restores disk.
+    with monkeypatch.context() as m:
+        m.setattr(serving_frame, "reset_serving_cache", lambda: (_ for _ in ()).throw(RuntimeError("Cache reset boom local")))
+        rec_local_rollback = run_retrain(trigger="manual", data_path=FIXTURE_CSV, models_dir=models_dir)
+    assert rec_local_rollback["outcome"] == "failed"
+    assert resolve_champion_version() is None
+    assert xgb_path.read_bytes() == orig_xgb_bytes
+    assert not is_retrain_running()
+
+
+def test_run_retrain_temporal_leakage_and_corrupt_file_guards(temp_mlflow_env, monkeypatch):
+    models_dir = temp_mlflow_env["models_dir"]
+    tmp_path = temp_mlflow_env["tmp"]
+    monkeypatch.setenv("ECOTRACK_DISABLE_MLFLOW", "1")
+
+    df = engineer_features(load_dataset(FIXTURE_CSV))
+    train_df, _ = split_time_series_data(df, train_ratio=0.8)
+    champ = _fit_tiny_xgb(train_df, max_depth=2, scale_target=0.5)
+    joblib.dump(champ, models_dir / "xgboost_forecaster.joblib")
+
+    # 1. Invalid train_ratio rejected cleanly (including negative values that Python slices would accept).
+    with pytest.raises(ValueError, match="train_ratio"):
+        start_retrain(train_ratio=-0.2)
+    rec_bad_ratio = run_retrain(train_ratio=-0.2, data_path=FIXTURE_CSV, models_dir=models_dir)
+    assert rec_bad_ratio["outcome"] == "failed"
+    assert "train_ratio" in (rec_bad_ratio["reason"] or "")
+
+    # 2. Duplicate timestamp across the 80/20 split boundary -> Temporal leakage detected.
+    raw_df = pd.read_csv(FIXTURE_CSV)
+    # Build 40 rows where split point shares the exact same timestamp.
+    dup_rows = raw_df.iloc[:40].copy()
+    engineered_count = len(dup_rows) - 24
+    split_pos = 24 + int(engineered_count * 0.8)
+    dup_rows.loc[dup_rows.index[split_pos], "timestamp"] = dup_rows.loc[dup_rows.index[split_pos - 1], "timestamp"]
+    dup_csv = tmp_path / "dup_boundary.csv"
+    dup_rows.to_csv(dup_csv, index=False)
+
+    rec_dup = run_retrain(data_path=dup_csv, models_dir=models_dir)
+    assert rec_dup["outcome"] == "failed"
+    assert "temporal leakage" in (rec_dup["reason"] or "").lower()
+
+    # 3. Active champion's recorded train_end_timestamp overlaps holdout -> Temporal leakage detected.
+    meta_path = models_dir / "model_metadata.json"
+    orig_meta = meta_path.read_text(encoding="utf-8")
+    meta = json.loads(orig_meta)
+    # Set champion training cutoff to the last timestamp of the entire fixture (inside test_df).
+    meta["train_end_timestamp"] = str(df["timestamp"].max().isoformat())
+    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+    rec_cutoff = run_retrain(data_path=FIXTURE_CSV, models_dir=models_dir)
+    assert rec_cutoff["outcome"] == "failed"
+    assert "champion training cutoff" in (rec_cutoff["reason"] or "").lower()
+
+    # 4. Corrupt model_metadata.json aborts promotion instead of overwriting isolation_forest_metrics.
+    meta_path.write_text("{broken json", encoding="utf-8")
+    good_chall = _fit_tiny_xgb(train_df, max_depth=3, scale_target=1.0)
+    monkeypatch.setattr(
+        retrain_mod,
+        "_train_challenger",
+        lambda tr, te: (good_chall, {"rmse_kwh": 10.0, "mae_kwh": 8.0, "r2_score": 0.9, "target_mape_met": True}),
+    )
+    rec_corrupt_meta = run_retrain(data_path=FIXTURE_CSV, models_dir=models_dir)
+    assert rec_corrupt_meta["outcome"] == "failed"
+    assert meta_path.read_text(encoding="utf-8") == "{broken json"
+
+    # 5. Corrupt retrain_history.json is backed up before starting fresh, not silently erased.
+    hist_path = models_dir / retrain_mod.RETRAIN_HISTORY_FILENAME
+    hist_path.write_text("{corrupt history", encoding="utf-8")
+    meta_path.write_text(orig_meta, encoding="utf-8")
+    rec_after_corrupt_hist = run_retrain(data_path=FIXTURE_CSV, models_dir=models_dir)
+    assert rec_after_corrupt_hist["outcome"] == "promoted"
+    backups = list(models_dir.glob("retrain_history.corrupt.*.bak"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == "{corrupt history"
 
 
 def test_retrain_endpoint_returns_202_409_and_enforces_internal_token(temp_mlflow_env, monkeypatch):

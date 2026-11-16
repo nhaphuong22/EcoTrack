@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import threading
 import uuid
@@ -23,9 +24,8 @@ import numpy as np
 import pandas as pd
 
 from src.config import get_data_path, get_models_dir
-from src.data_pipeline.serving_frame import reset_serving_cache
+from src.data_pipeline import serving_frame
 from src.mlops.config import (
-    CHAMPION_ALIAS,
     REGISTERED_MODEL_NAME,
     is_mlflow_initialised,
     mlflow_available,
@@ -34,7 +34,9 @@ from src.mlops.config import (
 from src.mlops.tracking import (
     ChampionArtifactError,
     ChampionUnavailable,
+    clear_champion_alias,
     configure,
+    get_champion_tag,
     load_champion_forecaster,
     promote_champion,
     track_training_run,
@@ -53,6 +55,7 @@ RETRAIN_HISTORY_FILENAME = "retrain_history.json"
 
 # ponytail: single-process threading.Lock for HTTP 409 concurrency guard; upgrade to a FileLock/DB lease only if multi-worker deployment is introduced.
 _retrain_lock = threading.Lock()
+_history_lock = threading.Lock()
 
 
 class RetrainAlreadyRunningError(Exception):
@@ -68,9 +71,29 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _validate_train_ratio(train_ratio: float) -> float:
+    if isinstance(train_ratio, bool) or not isinstance(train_ratio, (int, float)):
+        raise ValueError(f"train_ratio must be a float in (0, 1); got {train_ratio!r}")
+    ratio = float(train_ratio)
+    if not math.isfinite(ratio) or not (0.0 < ratio < 1.0):
+        raise ValueError(f"train_ratio must be strictly between 0 and 1; got {train_ratio!r}")
+    return ratio
+
+
 def _history_path(models_dir: Optional[Path] = None) -> Path:
     base = Path(models_dir) if models_dir is not None else get_models_dir()
     return base / RETRAIN_HISTORY_FILENAME
+
+
+def _atomic_write_bytes(target: Path, data: bytes) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = target.with_suffix(f"{target.suffix}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp_path.write_bytes(data)
+        os.replace(tmp_path, target)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
 
 
 def load_retrain_history(models_dir: Optional[Path] = None) -> List[Dict[str, Any]]:
@@ -78,37 +101,41 @@ def load_retrain_history(models_dir: Optional[Path] = None) -> List[Dict[str, An
     Read persisted retraining history (newest first). Returns ``[]`` when no
     history file exists yet.
     """
-    path = _history_path(models_dir)
-    if not path.is_file():
-        return []
-    with open(path, "r", encoding="utf-8") as fh:
-        data = json.load(fh)
-    if not isinstance(data, list):
-        raise ValueError(f"Expected a JSON list in {path}")
-    return data
+    with _history_lock:
+        path = _history_path(models_dir)
+        if not path.is_file():
+            return []
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, list):
+            raise ValueError(f"Expected a JSON list in {path}")
+        return data
 
 
 def _append_history(entry: Dict[str, Any], models_dir: Optional[Path] = None) -> None:
     """Prepend ``entry`` (newest first) to ``retrain_history.json`` via atomic temp-file swap."""
-    path = _history_path(models_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    existing: List[Dict[str, Any]] = []
-    if path.is_file():
-        try:
-            loaded = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(loaded, list):
+    with _history_lock:
+        path = _history_path(models_dir)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing: List[Dict[str, Any]] = []
+        if path.is_file():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(loaded, list):
+                    raise ValueError(f"Expected a JSON list in {path}")
                 existing = loaded
-        except Exception as exc:
-            logger.warning("Could not parse existing %s (%s); starting fresh history list.", path, exc)
-    updated = [entry, *existing]
-    tmp_path = path.with_suffix(f"{path.suffix}.{uuid.uuid4().hex}.tmp")
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as fh:
-            json.dump(updated, fh, indent=2)
-        os.replace(tmp_path, path)
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink(missing_ok=True)
+            except Exception as exc:
+                backup_path = path.with_name(f"{path.stem}.corrupt.{uuid.uuid4().hex[:8]}.bak")
+                logger.warning(
+                    "Could not parse existing %s (%s); backing up to %s before starting fresh.",
+                    path,
+                    exc,
+                    backup_path.name,
+                )
+                os.replace(path, backup_path)
+        updated = [entry, *existing]
+        payload = json.dumps(updated, indent=2, allow_nan=False).encode("utf-8")
+        _atomic_write_bytes(path, payload)
 
 
 def compute_holdout_mape(y_true: pd.Series | np.ndarray, y_pred: np.ndarray) -> float:
@@ -156,6 +183,32 @@ def _resolve_current_champion(models_dir: Path, tracking_uri: Optional[str] = No
     return joblib.load(xgb_path), "local"
 
 
+def _resolve_champion_train_end(
+    champion_version: str,
+    models_dir: Path,
+    tracking_uri: Optional[str] = None,
+) -> Optional[pd.Timestamp]:
+    """Return the recorded training cutoff timestamp for the active champion, if available."""
+    raw_cutoff: Optional[str] = None
+    if champion_version != "local" and not mlflow_disabled():
+        raw_cutoff = get_champion_tag("train_end_timestamp", tracking_uri=tracking_uri)
+    if raw_cutoff is None:
+        meta_path = models_dir / "model_metadata.json"
+        if meta_path.is_file():
+            try:
+                loaded_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                if isinstance(loaded_meta, dict):
+                    raw_cutoff = loaded_meta.get("train_end_timestamp")
+            except Exception:
+                raw_cutoff = None
+    if not raw_cutoff:
+        return None
+    ts = pd.Timestamp(raw_cutoff)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert(None)
+    return ts
+
+
 def _train_challenger(
     train_df: pd.DataFrame, test_df: pd.DataFrame
 ) -> Tuple[Any, Dict[str, Any]]:
@@ -172,6 +225,7 @@ def _update_local_artifacts_atomically(
     test_df: pd.DataFrame,
     xgb_metrics: Dict[str, Any],
     probe_X: pd.DataFrame,
+    train_end_iso: str,
 ) -> None:
     """
     Stage the challenger ``.joblib`` to a temp file, verify it loads and produces
@@ -182,7 +236,6 @@ def _update_local_artifacts_atomically(
     xgb_path = models_dir / "xgboost_forecaster.joblib"
     tmp_xgb = models_dir / f"xgboost_forecaster.joblib.{uuid.uuid4().hex}.tmp"
     meta_path = models_dir / "model_metadata.json"
-    tmp_meta = models_dir / f"model_metadata.json.{uuid.uuid4().hex}.tmp"
 
     try:
         joblib.dump(challenger_model, tmp_xgb)
@@ -193,32 +246,35 @@ def _update_local_artifacts_atomically(
 
         existing_meta: Dict[str, Any] = {}
         if meta_path.is_file():
-            try:
-                loaded_meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                if isinstance(loaded_meta, dict):
-                    existing_meta = loaded_meta
-            except Exception as exc:
-                logger.warning("Could not read existing %s (%s); writing fresh metadata.", meta_path, exc)
+            loaded_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            if not isinstance(loaded_meta, dict):
+                raise ValueError(f"Expected JSON object in {meta_path}")
+            existing_meta = loaded_meta
 
         existing_meta.update(
             {
                 "dataset_rows": len(df_feat),
                 "train_rows": len(train_df),
                 "test_rows": len(test_df),
+                "train_end_timestamp": train_end_iso,
                 "xgb_features": list(XGB_FEATURE_COLUMNS),
                 "xgboost_metrics": xgb_metrics,
             }
         )
-        with open(tmp_meta, "w", encoding="utf-8") as fh:
-            json.dump(existing_meta, fh, indent=2)
+        meta_bytes = json.dumps(existing_meta, indent=2, allow_nan=False).encode("utf-8")
 
         os.replace(tmp_xgb, xgb_path)
-        os.replace(tmp_meta, meta_path)
+        _atomic_write_bytes(meta_path, meta_bytes)
     finally:
         if tmp_xgb.exists():
             tmp_xgb.unlink(missing_ok=True)
-        if tmp_meta.exists():
-            tmp_meta.unlink(missing_ok=True)
+
+
+def _restore_file_snapshot(target: Path, snapshot: Optional[bytes]) -> None:
+    if snapshot is not None:
+        _atomic_write_bytes(target, snapshot)
+    elif target.exists():
+        target.unlink(missing_ok=True)
 
 
 def _verify_and_promote_challenger(
@@ -230,12 +286,14 @@ def _verify_and_promote_challenger(
     train_df: pd.DataFrame,
     test_df: pd.DataFrame,
     xgb_metrics: Dict[str, Any],
+    train_end_iso: str,
     tracking_uri: Optional[str] = None,
 ) -> None:
     """
-    Verify challenger loadability before promoting the MLflow ``champion`` alias
-    and refreshing the serving cache. Rolls back the alias to ``champion_version``
-    if local artifact swap or cache reset fails after alias promotion.
+    Verify challenger loadability before updating disk artifacts, switching the
+    MLflow ``champion`` alias, and refreshing the serving cache under
+    ``serving_frame._lock``. Restores prior disk artifacts and MLflow alias
+    on any failure.
     """
     probe_X = test_df[XGB_FEATURE_COLUMNS].iloc[:1]
     use_mlflow = (
@@ -256,39 +314,49 @@ def _verify_and_promote_challenger(
         if probe_pred.size == 0 or not np.all(np.isfinite(probe_pred)):
             raise ValueError("Challenger MLflow artifact produced non-finite probe predictions.")
 
+    xgb_path = models_dir / "xgboost_forecaster.joblib"
+    meta_path = models_dir / "model_metadata.json"
+    prev_xgb = xgb_path.read_bytes() if xgb_path.is_file() else None
+    prev_meta = meta_path.read_bytes() if meta_path.is_file() else None
+
     alias_switched = False
-    try:
-        _update_local_artifacts_atomically(
-            challenger_model=challenger_model,
-            models_dir=models_dir,
-            df_feat=df_feat,
-            train_df=train_df,
-            test_df=test_df,
-            xgb_metrics=xgb_metrics,
-            probe_X=probe_X,
-        )
-        if use_mlflow:
-            promote_champion(challenger_version, tracking_uri=tracking_uri)
-            alias_switched = True
-        reset_serving_cache()
-    except Exception:
-        if alias_switched and use_mlflow:
-            try:
-                if champion_version and champion_version != "local":
-                    promote_champion(champion_version, tracking_uri=tracking_uri)
-                else:
-                    from mlflow.tracking import MlflowClient
+    disk_updated = False
+    with serving_frame._lock:
+        try:
+            _update_local_artifacts_atomically(
+                challenger_model=challenger_model,
+                models_dir=models_dir,
+                df_feat=df_feat,
+                train_df=train_df,
+                test_df=test_df,
+                xgb_metrics=xgb_metrics,
+                probe_X=probe_X,
+                train_end_iso=train_end_iso,
+            )
+            disk_updated = True
+            if use_mlflow:
+                promote_champion(challenger_version, tracking_uri=tracking_uri)
+                alias_switched = True
+            serving_frame.reset_serving_cache()
+        except Exception:
+            if disk_updated:
+                try:
+                    _restore_file_snapshot(xgb_path, prev_xgb)
+                    _restore_file_snapshot(meta_path, prev_meta)
+                except Exception as restore_exc:
+                    logger.error("Failed to restore local model artifacts: %s", restore_exc)
+            if alias_switched and use_mlflow:
+                try:
+                    if champion_version and champion_version != "local":
+                        promote_champion(champion_version, tracking_uri=tracking_uri)
+                    else:
+                        clear_champion_alias(tracking_uri=tracking_uri)
+                except Exception as rollback_exc:
+                    logger.error("Failed to roll back champion alias to %s: %s", champion_version, rollback_exc)
+            raise
 
-                    uri = configure(tracking_uri=tracking_uri)
-                    MlflowClient(tracking_uri=uri).delete_registered_model_alias(
-                        REGISTERED_MODEL_NAME, CHAMPION_ALIAS
-                    )
-            except Exception as rollback_exc:
-                logger.error("Failed to roll back champion alias to %s: %s", champion_version, rollback_exc)
-        raise
 
-
-def run_retrain(
+def _execute_retrain_locked(
     trigger: str = "manual",
     run_id: Optional[str] = None,
     data_path: Optional[Path] = None,
@@ -296,20 +364,8 @@ def run_retrain(
     train_ratio: float = 0.8,
     tracking_uri: Optional[str] = None,
     signals: Optional[List[str]] = None,
-    _lock_already_held: bool = False,
 ) -> Dict[str, Any]:
-    """
-    Execute one synchronous retrain + holdout evaluation + guarded promotion cycle.
-
-    Callable directly as plain Python (AD-1, Story 4.9 scheduler, or tests) or
-    invoked inside a background thread by :func:`start_retrain`. Always releases
-    ``_retrain_lock`` in ``finally`` and appends a history entry with outcome
-    ``promoted``, ``rejected``, or ``failed``.
-    """
-    if not _lock_already_held:
-        if not _retrain_lock.acquire(blocking=False):
-            raise RetrainAlreadyRunningError("A retrain run is already in progress.")
-
+    """Core retrain execution body; caller must already hold ``_retrain_lock``."""
     resolved_run_id = run_id or uuid.uuid4().hex[:12]
     resolved_models: Optional[Path] = None
     champion_version: Optional[str] = None
@@ -320,11 +376,15 @@ def run_retrain(
     reason: Optional[str] = None
 
     try:
+        validated_ratio = _validate_train_ratio(train_ratio)
         resolved_data = Path(data_path) if data_path is not None else get_data_path()
         resolved_models = Path(models_dir) if models_dir is not None else get_models_dir()
 
         champion_model, champion_version = _resolve_current_champion(
             resolved_models, tracking_uri=tracking_uri
+        )
+        champion_train_end = _resolve_champion_train_end(
+            champion_version, resolved_models, tracking_uri=tracking_uri
         )
 
         raw_df = load_dataset(resolved_data)
@@ -332,12 +392,25 @@ def run_retrain(
         if len(df_feat) < 10:
             raise ValueError(f"Insufficient engineered rows for retraining: {len(df_feat)}")
 
-        train_df, test_df = split_time_series_data(df_feat, train_ratio=train_ratio)
+        train_df, test_df = split_time_series_data(df_feat, train_ratio=validated_ratio)
         if train_df.empty or test_df.empty:
             raise ValueError("Chronological train/holdout split produced an empty partition.")
-        if train_df["timestamp"].max() >= test_df["timestamp"].min():
-            raise ValueError("Temporal leakage detected: holdout window must start strictly after training cutoff.")
 
+        holdout_start = pd.Timestamp(test_df["timestamp"].min())
+        if holdout_start.tzinfo is not None:
+            holdout_start = holdout_start.tz_convert(None)
+        train_end = pd.Timestamp(train_df["timestamp"].max())
+        if train_end.tzinfo is not None:
+            train_end = train_end.tz_convert(None)
+
+        if train_end >= holdout_start:
+            raise ValueError("Temporal leakage detected: holdout window must start strictly after training cutoff.")
+        if champion_train_end is not None and champion_train_end >= holdout_start:
+            raise ValueError(
+                "Temporal leakage detected: holdout window must start strictly after active champion training cutoff."
+            )
+
+        train_end_iso = train_end.isoformat()
         challenger_model, xgb_metrics = _train_challenger(train_df, test_df)
 
         X_holdout = test_df[XGB_FEATURE_COLUMNS]
@@ -350,7 +423,7 @@ def run_retrain(
         challenger_mape = compute_holdout_mape(y_holdout, chall_preds)
         xgb_metrics = {
             **xgb_metrics,
-            "mape_percent": round(challenger_mape, 2),
+            "mape_percent": round(challenger_mape, 4),
             "target_mape_met": challenger_mape <= 10.0,
         }
 
@@ -383,6 +456,7 @@ def run_retrain(
                 run_name=f"retrain_{trigger}",
                 tracking_uri=tracking_uri,
                 bootstrap_champion=False,
+                tags={"train_end_timestamp": train_end_iso},
             )
             if tracked:
                 challenger_version = str(tracked["version"])
@@ -397,12 +471,13 @@ def run_retrain(
                 train_df=train_df,
                 test_df=test_df,
                 xgb_metrics=xgb_metrics,
+                train_end_iso=train_end_iso,
                 tracking_uri=tracking_uri,
             )
             outcome = "promoted"
             reason = None
             logger.info(
-                "Retrain %s promoted challenger v%s over champion v%s (MAPE %.4f%% < %.4f%%).",
+                "Retrain %s promoted challenger v%s over champion v%s (MAPE %.6f%% < %.6f%%).",
                 resolved_run_id,
                 challenger_version,
                 champion_version,
@@ -412,11 +487,11 @@ def run_retrain(
         else:
             outcome = "rejected"
             reason = (
-                f"Challenger MAPE ({challenger_mape:.4f}%) is not strictly lower than "
-                f"champion MAPE ({champion_mape:.4f}%)."
+                f"Challenger MAPE ({challenger_mape:.6f}%) is not strictly lower than "
+                f"champion MAPE ({champion_mape:.6f}%)."
             )
             logger.info(
-                "Retrain %s rejected challenger v%s vs champion v%s (MAPE %.4f%% >= %.4f%%).",
+                "Retrain %s rejected challenger v%s vs champion v%s (MAPE %.6f%% >= %.6f%%).",
                 resolved_run_id,
                 challenger_version,
                 champion_version,
@@ -434,8 +509,8 @@ def run_retrain(
             "trigger": trigger,
             "champion_version": champion_version,
             "challenger_version": challenger_version,
-            "champion_mape": round(champion_mape, 4) if champion_mape is not None and np.isfinite(champion_mape) else None,
-            "challenger_mape": round(challenger_mape, 4) if challenger_mape is not None and np.isfinite(challenger_mape) else None,
+            "champion_mape": round(champion_mape, 6) if champion_mape is not None and np.isfinite(champion_mape) else None,
+            "challenger_mape": round(challenger_mape, 6) if challenger_mape is not None and np.isfinite(challenger_mape) else None,
             "outcome": outcome,
             "reason": reason,
         }
@@ -445,10 +520,40 @@ def run_retrain(
             _append_history(record, models_dir=resolved_models)
         except Exception as hist_exc:
             logger.error("Failed to persist retrain history for %s: %s", resolved_run_id, hist_exc)
+            record["history_persisted"] = False
         finally:
             _retrain_lock.release()
 
     return record
+
+
+def run_retrain(
+    trigger: str = "manual",
+    run_id: Optional[str] = None,
+    data_path: Optional[Path] = None,
+    models_dir: Optional[Path] = None,
+    train_ratio: float = 0.8,
+    tracking_uri: Optional[str] = None,
+    signals: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Execute one synchronous retrain + holdout evaluation + guarded promotion cycle.
+
+    Callable directly as plain Python (AD-1, Story 4.9 scheduler, or tests).
+    Always releases ``_retrain_lock`` in ``finally`` and persists a history record
+    with outcome ``promoted``, ``rejected``, or ``failed``.
+    """
+    if not _retrain_lock.acquire(blocking=False):
+        raise RetrainAlreadyRunningError("A retrain run is already in progress.")
+    return _execute_retrain_locked(
+        trigger=trigger,
+        run_id=run_id,
+        data_path=data_path,
+        models_dir=models_dir,
+        train_ratio=train_ratio,
+        tracking_uri=tracking_uri,
+        signals=signals,
+    )
 
 
 def start_retrain(
@@ -460,10 +565,12 @@ def start_retrain(
     signals: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
-    Atomically acquire the retrain lock, launch :func:`run_retrain` in a daemon
-    background thread, and return immediately with ``run_id`` and ``started_at``.
-    Raises :class:`RetrainAlreadyRunningError` (HTTP 409) when a job is already active.
+    Atomically acquire the retrain lock, launch :func:`_execute_retrain_locked`
+    in a daemon background thread, and return immediately with ``run_id`` and
+    ``started_at``. Raises :class:`RetrainAlreadyRunningError` (HTTP 409) when
+    a job is already active.
     """
+    _validate_train_ratio(train_ratio)
     if not _retrain_lock.acquire(blocking=False):
         raise RetrainAlreadyRunningError("A retrain run is already in progress.")
 
@@ -471,7 +578,7 @@ def start_retrain(
     started_at = _utc_now_iso()
     try:
         worker = threading.Thread(
-            target=run_retrain,
+            target=_execute_retrain_locked,
             kwargs={
                 "trigger": trigger,
                 "run_id": run_id,
@@ -480,7 +587,6 @@ def start_retrain(
                 "train_ratio": train_ratio,
                 "tracking_uri": tracking_uri,
                 "signals": signals,
-                "_lock_already_held": True,
             },
             name=f"ecotrack-retrain-{run_id}",
             daemon=True,

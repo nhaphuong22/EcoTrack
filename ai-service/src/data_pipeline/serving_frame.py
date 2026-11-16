@@ -38,7 +38,7 @@ class InsufficientHistoryError(Exception):
         self.required = required
 
 
-_lock = threading.Lock()
+_lock = threading.RLock()
 _cached_base_df: Optional[pd.DataFrame] = None
 _cached_meta: Optional[Dict[str, Any]] = None
 _cached_hour_key: Optional[datetime] = None
