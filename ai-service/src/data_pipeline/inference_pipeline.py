@@ -324,28 +324,54 @@ class EnergyInferencePipeline:
         future_dt = pd.to_datetime(future_timestamps)
         n_steps = len(future_dt)
 
-        # Buffer containing recent timestamps and readings
-        simulated_history = list(zip(hist["timestamp"], hist["meter_reading"].astype(float)))
+        hist_ts = list(hist["timestamp"])
+        hist_vals = hist["meter_reading"].astype(float).tolist()
+        time_to_reading = dict(zip(hist_ts, hist_vals))
+        last_observed = hist_vals[-1]
+        booster = xgb_model.get_booster() if hasattr(xgb_model, "get_booster") else None
+        feature_names = self.xgb_features
 
         forecast_records: List[Dict[str, Any]] = []
+        row_buf = np.empty((1, len(feature_names)), dtype=np.float32)
 
         for i in range(n_steps):
             current_ts = future_dt[i]
             current_temp = float(future_temperatures[i])
 
-            # Recent readings dataframe slice
-            recent_slice = pd.DataFrame(
-                simulated_history[-48:], columns=["timestamp", "meter_reading"]
-            )
+            hour = int(current_ts.hour)
+            dayofweek = int(current_ts.day_of_week)
+            is_weekend = int(dayofweek >= 5)
+            angle = 2.0 * np.pi * hour / 24.0
+            hour_sin = float(np.sin(angle))
+            hour_cos = float(np.cos(angle))
 
-            # Prepare single step feature
-            X_step = self.prepare_forecast_features(
-                recent_readings_df=recent_slice,
-                future_timestamps=[current_ts],
-                future_temperatures=[current_temp],
-            )
+            ts_24h_prior = current_ts - pd.Timedelta(hours=24)
+            if ts_24h_prior in time_to_reading:
+                lag_24h = float(time_to_reading[ts_24h_prior])
+            else:
+                slice_len = min(len(hist_vals), 48)
+                lag_24h = float(hist_vals[-24] if slice_len >= 24 else hist_vals[-1])
 
-            pred_val = float(xgb_model.predict(X_step)[0])
+            ts_1h_prior = current_ts - pd.Timedelta(hours=1)
+            lag_1h = float(time_to_reading.get(ts_1h_prior, hist_vals[-1] if i == 0 else last_observed))
+
+            feature_map = {
+                "air_temperature": round(current_temp, 2),
+                "hour": hour,
+                "dayofweek": dayofweek,
+                "is_weekend": is_weekend,
+                "hour_sin": hour_sin,
+                "hour_cos": hour_cos,
+                "lag_1h": round(lag_1h, 2),
+                "lag_24h": round(lag_24h, 2),
+            }
+            for col_idx, col_name in enumerate(feature_names):
+                row_buf[0, col_idx] = feature_map[col_name]
+
+            if booster is not None:
+                pred_val = float(booster.inplace_predict(row_buf)[0])
+            else:
+                pred_val = float(xgb_model.predict(pd.DataFrame(row_buf, columns=feature_names))[0])
             pred_val = round(max(0.0, pred_val), 2)
 
             forecast_records.append({
@@ -354,7 +380,8 @@ class EnergyInferencePipeline:
                 "air_temperature": current_temp,
             })
 
-            # Append prediction to simulated history for autoregressive chaining
-            simulated_history.append((current_ts, pred_val))
+            time_to_reading[current_ts] = pred_val
+            hist_vals.append(pred_val)
+            last_observed = pred_val
 
         return pd.DataFrame(forecast_records)

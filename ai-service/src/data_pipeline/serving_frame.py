@@ -358,12 +358,14 @@ def _forecast_from_frame(
         )
 
     rmse = float(meta["xgboost_metrics"]["rmse_kwh"])
-    frame_ts = pd.to_datetime(frame["timestamp"], utc=True).dt.tz_convert(None)
-    last_ts = frame_ts.iloc[-1]
+    tail_n = min(len(frame), 48)
+    tail_frame = frame.iloc[-tail_n:]
+    tail_ts = pd.to_datetime(tail_frame["timestamp"], utc=True).dt.tz_convert(None)
+    last_ts = tail_ts.iloc[-1]
     future_dt = [last_ts + pd.Timedelta(hours=h) for h in range(1, FORECAST_HORIZON_HOURS + 1)]
 
-    temp_by_ts = dict(zip(frame_ts, frame["outdoor_temperature_c"].astype(float)))
-    recent_temps = frame["outdoor_temperature_c"].to_numpy(dtype=float)
+    recent_temps = tail_frame["outdoor_temperature_c"].to_numpy(dtype=float)
+    temp_by_ts = dict(zip(tail_ts, recent_temps))
     future_temps: list = []
     for i, ts in enumerate(future_dt):
         prior_day_ts = ts - pd.Timedelta(hours=24)
@@ -372,10 +374,9 @@ def _forecast_from_frame(
         else:
             future_temps.append(float(recent_temps[-FORECAST_HORIZON_HOURS + i]))
 
-    tail_n = min(len(frame), 48)
     recent_readings = pd.DataFrame({
-        "timestamp": frame_ts.iloc[-tail_n:].to_numpy(),
-        "meter_reading_kwh": frame["meter_reading_kwh"].iloc[-tail_n:].to_numpy(dtype=float),
+        "timestamp": tail_ts.to_numpy(),
+        "meter_reading_kwh": tail_frame["meter_reading_kwh"].to_numpy(dtype=float),
     })
 
     forecast_df = pipeline.predict_forecast_autoregressive(
