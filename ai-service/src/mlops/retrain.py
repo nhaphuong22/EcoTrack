@@ -26,7 +26,10 @@ import pandas as pd
 from src.config import get_data_path, get_models_dir
 from src.data_pipeline import serving_frame
 from src.mlops.config import (
+    HISTORY_LOCK as _history_lock,
+    METADATA_LOCK,
     REGISTERED_MODEL_NAME,
+    RETRAIN_HISTORY_FILENAME,
     is_mlflow_initialised,
     mlflow_available,
     mlflow_disabled,
@@ -51,11 +54,8 @@ from src.models.train_models import (
 
 logger = logging.getLogger("MLOpsRetrain")
 
-RETRAIN_HISTORY_FILENAME = "retrain_history.json"
-
 # ponytail: single-process threading.Lock for HTTP 409 concurrency guard; upgrade to a FileLock/DB lease only if multi-worker deployment is introduced.
 _retrain_lock = threading.Lock()
-_history_lock = threading.Lock()
 
 
 class RetrainAlreadyRunningError(Exception):
@@ -321,7 +321,7 @@ def _verify_and_promote_challenger(
 
     alias_switched = False
     disk_updated = False
-    with serving_frame._lock:
+    with METADATA_LOCK, serving_frame._lock:
         try:
             _update_local_artifacts_atomically(
                 challenger_model=challenger_model,

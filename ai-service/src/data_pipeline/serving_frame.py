@@ -1,4 +1,5 @@
 import json
+import hashlib
 import logging
 import threading
 from datetime import datetime, timezone
@@ -289,7 +290,10 @@ def get_anomaly_events(frame: Optional[pd.DataFrame] = None) -> List[Dict[str, A
         cost_vnd = delta * tariff_vnd
         cost_usd = delta * tariff_usd
         events.append({
-            "id": f"ANOM-{idx}",
+            # A replay observation keeps its identity when its position changes.
+            "id": "ANOM-" + hashlib.sha256(
+                f"replay-v1|office_tower_01|{row['timestamp']}|{float(row['meter_reading_kwh'])}|{float(row['predicted_kwh'])}".encode()
+            ).hexdigest()[:40],
             "building_id": "office_tower_01",
             "timestamp": str(row["timestamp"]),
             "subsystem": "Chiller & HVAC Plant",

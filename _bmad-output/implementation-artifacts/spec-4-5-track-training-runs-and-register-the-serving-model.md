@@ -160,3 +160,43 @@ Iteration 0 (2026-10-29). Verdicts rendered against the actual tree; grouped by 
 | R9 | `set_time_budget(0)` ⇒ net left untrained (edge-case) | low | reject | `per_fold_budget = max(1.0, timeout/folds)` ≥ 1.0; never 0 within the search. |
 | R10 | `build_tuned_models` crashes on malformed/non-dict `best_params.json` (edge-case) | low | reject | File is produced by `run_hpo`; a hand-corrupted file failing loudly with a traceback is tolerable, and the fix adds guards. |
 | R11 | `torch` ImportError aborts an LSTM study under `catch=()` (edge-case, low-conf) | low | reject | `torch` ships in `requirements-experiments.txt` alongside `optuna`; if you run the search it is installed. Resilience subsumed by G2. |
+
+## Review Findings (code-review 2026-10-31)
+
+Second review pass (bmad-code-review) over `git diff ddd37ae...HEAD` with four parallel layers (blind-hunter, edge-case-hunter, verification-gap, acceptance-auditor). Owner-prioritised focus: test-split leakage guard. Verdicts rendered against the live tree.
+
+### decision-needed (resolved 2026-10-31 → applied as patch)
+
+- [x] [Review][Decision→Patch] Health reports `forecast="loaded"` / `champion="resolved"` while serving 503s on a broken champion. **Owner decision: health loads the champion artifact on every probe (no cache).** Applied: new `champion_health()` loads via `load_champion_forecaster()` and reports `resolved`/`broken`/`unavailable`; `/health?details=true` now maps `broken`→`forecast="unavailable"`. [ai-service/src/main.py] [ai-service/src/mlops/tracking.py]
+
+### patch
+
+- [x] [Review][Patch] Test-split guard uses `assert` (stripped under `python -O`/`PYTHONOPTIMIZE`) — the strongest FR47 "test split never touched" guarantee silently disappears in optimized runs; use explicit `raise` [ai-service/src/mlops/hpo.py:101]
+- [x] [Review][Patch] `register_and_bootstrap_champion` catches all exceptions on the alias read and treats them as "no champion", so a transient/locked-DB read error while a champion exists overwrites it (violates set-if-absent) — distinguish not-found (→ None) from other errors (→ raise), as `load_champion_forecaster` already does [ai-service/src/mlops/tracking.py:129]
+- [x] [Review][Patch] `mlflow>=2.9.0` has no upper bound; code uses `log_model(artifact_path=...)`, `register_model`, `models:/name@alias` APIs that shifted across MLflow majors — pin `<3` [ai-service/requirements.txt:10]
+- [x] [Review][Patch] `best_params.json` (generated search output written to experiments/benchmark/) is not git-ignored; `.gitignore` only covers `mlruns/` [.gitignore]
+- [x] [Review][Patch] `execute_benchmark` docstring omits the new `models` parameter [ai-service/experiments/benchmark/run_benchmark.py:78]
+- [x] [Review][Patch] No test asserts LSTM tuned hyperparameters reach the built network (`_net.lstm.hidden_size`/`num_layers`, optimiser lr/batch) — silent no-op LSTM tuning would make tuned rows equal untuned while labeled "tuned"; mirror the XGBoost `set_params` test [ai-service/tests/test_benchmark_tuning.py]
+- [x] [Review][Patch] LSTM per-trial wall-clock cap (`break` on elapsed budget) is never exercised — add a deterministic test (`set_time_budget(0)` stops at ~0 epochs) [ai-service/tests/test_mlops_hpo.py]
+- [x] [Review][Patch] No serving test for an initialised store with no `champion` alias; the `_is_not_found` → `ChampionUnavailable` fallback branch is never run, so a misclassified alias-not-found would 503 the service at startup instead of falling back [ai-service/tests/test_serving_champion_load.py]
+
+### defer
+
+- [x] [Review][Defer] `n_jobs=-1` in the XGBoost search objective may undermine the determinism guarantee (4.1 AC3) that `test_search_is_deterministic_under_fixed_seed` asserts — maybe-false: XGBoost `hist` is generally deterministic, and the CI test is green; settle by running that test repeatedly / watching CI for flakes before pinning `n_jobs=1` [ai-service/src/mlops/hpo.py:154]
+- [x] [Review][Defer] `XGBoostForecaster.DEFAULT_PARAMS` duplicates `train_models.py` hyperparameters with no equality guard — a future tweak to `train_models.py` silently makes the untuned benchmark row stop reproducing the served model; add a guard test or single-source the values [ai-service/experiments/benchmark/models.py:152]
+
+### Rejected
+
+- `false` — XGBoostForecaster(params={"random_state":...}) double-passes random_state → TypeError: unreachable; the Optuna space has no `random_state` and `build_tuned_models` uses `set_params` (which pops it), not constructor `params=` [models.py:162].
+- `false` — LSTM `batch_size=0` → `range(...,0)` ValueError: unreachable; search space is categorical `[64,128,256]` and `best_params.json` is machine-generated [lstm.py:231].
+- `low` — malformed/non-dict `best_params.json` crashes `build_tuned_models`: file is produced by `run_hpo`; a hand-corrupted file failing loudly is tolerable.
+- `low` — served image uses full `mlflow` not `mlflow-skinny`: `mlflow` in served requirements is a locked spec decision; skinny omits flavor deps and the swap is risky, not a direct fix.
+- `low` — tracking URI absolute while artifact root relative (and AC4 literal "relative URI"): intent (portability, no absolute path in the store) is met and the asymmetry is a locked architect decision; the only real failure needs running MLflow from a non-`ai-service/` CWD, against the documented contract.
+- `low` — `configure()` side-effect (set_tracking_uri/mkdir/create_experiment) on each detailed health probe: idempotent and benign (R6 recurrence).
+- `low` — no distinct test for the genuine `mlflow`-not-installed path (vs the disable-flag path): both reach the same fallback; adding a package-absent test is extra complexity for negligible risk.
+- `low` — concurrency test uses threads not processes while `filelock` is cross-process: the lock library handles cross-process serialisation; a multi-process test is new complexity, not a direct fix.
+- `low` — happy-path tracking test does not assert `mape_percent` is logged: production logs MAPE (train_models.py:189); coverage-only nit.
+- `low` — LSTM best-params determinism not covered by the determinism test: XGBoost-only determinism test is adequate; a slow LSTM determinism test is disproportionate.
+- `low` — `ECOTRACK_DISABLE_MLFLOW` only accepts `1`/`true`/`True`, not `yes`/`on`/`TRUE`: owner sets `1`; negligible (R4 recurrence).
+- `low` — `run_searches` aborts and skips the `best_params.json` write if a later model has zero completed trials: the Optuna study is persisted in `optuna.db` (resumable), so completed work is not lost; the guard fix adds branches.
+- `low` — spec front-matter `status: done` vs `sprint-status.yaml: review`: reconciled by this review's status sync (Step 6), not a code defect.

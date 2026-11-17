@@ -30,7 +30,9 @@ def _seed_mlflow_champion(
     metrics: dict,
     *,
     with_alias: bool = True,
-    with_flavor_data: bool = False,
+    with_flavor_data: bool = True,
+    mlmodel_content: str | None = None,
+    artifact_relpath: str | None = "model.xgb",
 ) -> tuple[str, Path]:
     mlflow = pytest.importorskip("mlflow")
     from mlflow.tracking import MlflowClient
@@ -44,7 +46,11 @@ def _seed_mlflow_champion(
         exp_id = mlflow.create_experiment("ecotrack-test", artifact_location=artifacts.as_posix())
         with mlflow.start_run(experiment_id=exp_id) as run:
             mlflow.log_metrics(metrics)
-            if with_flavor_data:
+            if mlmodel_content is not None:
+                mlflow.log_text(mlmodel_content, "model/MLmodel")
+                if artifact_relpath is not None:
+                    mlflow.log_text("stub-xgb-bytes", f"model/{artifact_relpath}")
+            elif with_flavor_data:
                 mlflow.log_text(
                     "flavors:\n  xgboost:\n    data: model.xgb\n",
                     "model/MLmodel",
@@ -309,6 +315,191 @@ def test_status_isolates_corrupt_json_and_non_finite_while_loaders_fail_loud(tmp
     # Output remains strict RFC-8259 JSON serializable.
     json.dumps(status, allow_nan=False)
     json.dumps(bad_types_status, allow_nan=False)
+
+
+def test_status_mlmodel_flavors_nested_artifacts_and_tracking_uri_whitespace(
+    tmp_path, monkeypatch
+):
+    from src.mlops.status import get_mlops_status
+
+    monkeypatch.delenv("ECOTRACK_DISABLE_MLFLOW", raising=False)
+    empty_models = tmp_path / "models_empty"
+    empty_models.mkdir()
+    monkeypatch.setenv("ECOTRACK_MODELS_DIR", str(empty_models))
+    monkeypatch.setenv("ECOTRACK_BENCHMARK_RESULTS_PATH", str(tmp_path / "missing_bench.json"))
+
+    # 1. MLmodel missing flavors -> broken.
+    uri_no_flavors, _ = _seed_mlflow_champion(
+        tmp_path / "no_flavors", {"rmse_kwh": 21.0}, with_flavor_data=False
+    )
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", uri_no_flavors)
+    assert get_mlops_status()["champion"]["status"] == "broken"
+
+    # 2. Non-dict MLmodel YAML -> broken.
+    uri_nondict, _ = _seed_mlflow_champion(
+        tmp_path / "nondict",
+        {"rmse_kwh": 21.0},
+        mlmodel_content="- not-a-mapping\n",
+    )
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", uri_nondict)
+    assert get_mlops_status()["champion"]["status"] == "broken"
+
+    # 3. Invalid data path "." -> broken.
+    uri_dot_data, _ = _seed_mlflow_champion(
+        tmp_path / "dot_data",
+        {"rmse_kwh": 21.0},
+        mlmodel_content="flavors:\n  xgboost:\n    data: .\n",
+    )
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", uri_dot_data)
+    assert get_mlops_status()["champion"]["status"] == "broken"
+
+    # 4. Nested artifact subdir/model.xgb present -> resolved; deleting leaf file -> broken.
+    uri_nested, arts_nested = _seed_mlflow_champion(
+        tmp_path / "nested",
+        {"rmse_kwh": 19.5},
+        mlmodel_content="flavors:\n  xgboost:\n    data: subdir/model.xgb\n",
+        artifact_relpath="subdir/model.xgb",
+    )
+    # Whitespace-padded MLFLOW_TRACKING_URI is trimmed consistently by config & status.
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"  {uri_nested}  ")
+    assert mlops_config.get_tracking_uri() == uri_nested
+    assert mlops_config.is_mlflow_initialised(f"  {uri_nested}  ") is True
+    assert get_mlops_status()["champion"]["status"] == "resolved"
+
+    for leaf in arts_nested.rglob("model.xgb"):
+        leaf.unlink()
+    assert get_mlops_status()["champion"]["status"] == "broken"
+
+    # 5. Whitespace-only MLFLOW_TRACKING_URI treated as unset / uninitialized.
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    unset_uri = mlops_config.get_tracking_uri()
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "   ")
+    assert mlops_config.get_tracking_uri() == unset_uri
+    assert mlops_config.is_mlflow_initialised("   ") is False
+
+
+def test_status_nan_mlflow_metric_warned_and_filtered(tmp_path, monkeypatch, caplog):
+    import json
+    import logging
+    from fastapi.testclient import TestClient
+    from src.main import app
+    from src.mlops.tracking import get_champion_metadata
+
+    monkeypatch.delenv("ECOTRACK_DISABLE_MLFLOW", raising=False)
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    monkeypatch.setenv("ECOTRACK_MODELS_DIR", str(models_dir))
+    monkeypatch.setenv("ECOTRACK_BENCHMARK_RESULTS_PATH", str(tmp_path / "missing_bench.json"))
+    monkeypatch.setenv("INTERNAL_API_KEY", "status-secret")
+
+    uri, _ = _seed_mlflow_champion(
+        tmp_path / "nan_run",
+        {"rmse_kwh": 22.5, "nan_metric": float("nan")},
+    )
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
+
+    with caplog.at_level(logging.WARNING):
+        meta = get_champion_metadata()
+    assert meta is not None
+    assert meta["metrics"] == {"rmse_kwh": 22.5}
+    assert any("non-finite" in rec.message.lower() for rec in caplog.records)
+
+    with TestClient(app) as client:
+        resp = client.get(
+            "/internal/mlops/status",
+            headers={"X-Internal-Token": "status-secret"},
+        )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["champion"]["metrics"] == {"rmse_kwh": 22.5}
+    json.dumps(payload, allow_nan=False)
+
+
+def test_status_json_edge_cases_and_lightweight_import(tmp_path, monkeypatch, caplog):
+    import logging
+    import subprocess
+    import sys
+    from src.mlops.status import get_mlops_status
+
+    # 1. validate_duration_seconds rejects None and non-scalar containers.
+    with pytest.raises(ValueError):
+        mlops_config.validate_duration_seconds(None, "timeout")
+
+    # 2. Default benchmark path resolves exactly to AI_SERVICE_DIR/experiments/benchmark/results.json.
+    monkeypatch.delenv("ECOTRACK_BENCHMARK_RESULTS_PATH", raising=False)
+    expected_bench = mlops_config.AI_SERVICE_DIR / "experiments" / "benchmark" / "results.json"
+    assert mlops_config.get_benchmark_results_path() == expected_bench
+
+    # 3. 1e500 overflow float, directory at artifact path, 0-byte .joblib,
+    # and malformed retrain_history timestamps are isolated without crashing.
+    monkeypatch.setenv("ECOTRACK_DISABLE_MLFLOW", "1")
+    models_dir = tmp_path / "models_edge"
+    models_dir.mkdir()
+    (models_dir / "xgboost_forecaster.joblib").write_bytes(b"")  # 0 bytes -> unavailable
+    (models_dir / "model_metadata.json").write_text('{"rmse_kwh": 1e500}', encoding="utf-8")
+    (models_dir / "drift_status.json").mkdir()  # directory at file path
+    (models_dir / "retrain_history.json").write_text(
+        (
+            '[{"timestamp": "not-a-timestamp", "trigger": "manual"},'
+            ' {"timestamp": "2026-01-02T00:00:00Z", "trigger": "scheduled"},'
+            ' {"trigger": "missing-ts"}]'
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ECOTRACK_MODELS_DIR", str(models_dir))
+    monkeypatch.setenv("ECOTRACK_BENCHMARK_RESULTS_PATH", str(tmp_path / "missing_bench.json"))
+
+    with caplog.at_level(logging.WARNING):
+        payload = get_mlops_status()
+
+    assert payload["champion"]["status"] == "unavailable"
+    assert payload["champion"]["metrics"] is None
+    assert "Non-finite" in payload["errors"]["champion"]
+    assert "Non-finite" in payload["errors"]["anomaly_quality"]
+    assert payload["drift"] is None
+    assert "drift" in payload["errors"]
+    assert payload["retrain_history"][0]["trigger"] == "scheduled"
+    assert len(payload["retrain_history"]) == 3
+    assert any("retrain_history" in rec.message for rec in caplog.records)
+
+    # 4. astimezone overflow on train_end_timestamp and invalid inner metadata types.
+    models_dir_2 = tmp_path / "models_inner"
+    models_dir_2.mkdir()
+    (models_dir_2 / "xgboost_forecaster.joblib").write_bytes(b"xgb")
+    (models_dir_2 / "model_metadata.json").write_text(
+        json.dumps(
+            {
+                "train_end_timestamp": "9999-12-31T23:59:59-05:00",
+                "xgboost_metrics": ["bad"],
+                "isolation_forest_quality": "bad",
+            }
+        ),
+        encoding="utf-8",
+    )
+    with caplog.at_level(logging.WARNING):
+        payload2 = get_mlops_status(models_dir=models_dir_2)
+
+    assert payload2["champion"]["status"] == "fallback"
+    assert payload2["champion"]["trained_at"] is None
+    assert payload2["champion"]["metrics"] is None
+    assert payload2["anomaly_quality"] is None
+    assert "Invalid train_end_timestamp" in payload2["errors"]["champion"]
+    assert "Expected dict for xgboost_metrics" in payload2["errors"]["champion"]
+    assert "Expected dict for isolation_forest_quality" in payload2["errors"]["anomaly_quality"]
+
+    # 5. Importing src.mlops.status stays lightweight (no FastAPI, MLflow, retrain, or scheduler imported).
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys, src.mlops.status; "
+                "assert {'fastapi', 'mlflow', 'src.mlops.retrain', 'src.mlops.scheduler'}.isdisjoint(sys.modules)"
+            ),
+        ],
+        cwd=str(mlops_config.AI_SERVICE_DIR),
+        check=True,
+    )
 
 
 def test_http_internal_mlops_status_auth_to_thread_and_states(tmp_path, monkeypatch):

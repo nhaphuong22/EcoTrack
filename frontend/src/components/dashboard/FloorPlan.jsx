@@ -4,80 +4,24 @@ import { fetchZones } from '../../services/api';
 import { useLiveReadings } from '../../hooks/useLiveReadings';
 import ZoneDetailModal from './ZoneDetailModal';
 
+// Room states: fill and stroke are drawn in the SVG, `textColor` is for any HTML consumer.
+const NO_READING = { fill: '#edf1ef', stroke: '#a9b8b3', statusText: 'Chưa có đo', textColor: 'text-muted' };
+
 // Helper to determine color and text status for temperature
 function getTempColorAndStatus(temp) {
-  if (!Number.isFinite(temp)) {
-    return {
-      fill: 'rgba(51, 65, 85, 0.6)',
-      stroke: '#475569',
-      statusText: 'Chưa có đo',
-      textColor: 'text-slate-400',
-    };
-  }
-  if (temp < 22) {
-    return {
-      fill: 'rgba(2, 132, 199, 0.45)', // Sky blue
-      stroke: '#0284c7',
-      statusText: 'Mát lạnh',
-      textColor: 'text-sky-400',
-    };
-  }
-  if (temp <= 25) {
-    return {
-      fill: 'rgba(16, 185, 129, 0.45)', // Emerald
-      stroke: '#10b981',
-      statusText: 'Tối ưu',
-      textColor: 'text-emerald-400',
-    };
-  }
-  if (temp <= 28) {
-    return {
-      fill: 'rgba(245, 158, 11, 0.45)', // Amber
-      stroke: '#f59e0b',
-      statusText: 'Hơi ấm',
-      textColor: 'text-amber-400',
-    };
-  }
-  return {
-    fill: 'rgba(239, 68, 68, 0.55)', // Rose/Red
-    stroke: '#ef4444',
-    statusText: 'Nhiệt cao',
-    textColor: 'text-rose-400',
-  };
+  if (!Number.isFinite(temp)) return NO_READING;
+  if (temp < 22) return { fill: '#dce7fb', stroke: '#1f55cc', statusText: 'Mát lạnh', textColor: 'text-signal' };
+  if (temp <= 25) return { fill: '#d9efe2', stroke: '#17784a', statusText: 'Tối ưu', textColor: 'text-ok' };
+  if (temp <= 28) return { fill: '#fbecc9', stroke: '#c07a00', statusText: 'Hơi ấm', textColor: 'text-warn' };
+  return { fill: '#fbdad6', stroke: '#bd2630', statusText: 'Nhiệt cao', textColor: 'text-crit' };
 }
 
 // Helper to determine color and text status for energy waste/consumption
 function getWasteColorAndStatus(kwh) {
-  if (!Number.isFinite(kwh)) {
-    return {
-      fill: 'rgba(51, 65, 85, 0.6)',
-      stroke: '#475569',
-      statusText: 'Chưa có đo',
-      textColor: 'text-slate-400',
-    };
-  }
-  if (kwh < 40) {
-    return {
-      fill: 'rgba(16, 185, 129, 0.45)', // Emerald
-      stroke: '#10b981',
-      statusText: 'Tiết kiệm',
-      textColor: 'text-emerald-400',
-    };
-  }
-  if (kwh <= 80) {
-    return {
-      fill: 'rgba(245, 158, 11, 0.45)', // Amber
-      stroke: '#f59e0b',
-      statusText: 'Trung bình',
-      textColor: 'text-amber-400',
-    };
-  }
-  return {
-    fill: 'rgba(239, 68, 68, 0.55)', // Red
-    stroke: '#ef4444',
-    statusText: 'Lãng phí cao',
-    textColor: 'text-rose-400',
-  };
+  if (!Number.isFinite(kwh)) return NO_READING;
+  if (kwh < 40) return { fill: '#d9efe2', stroke: '#17784a', statusText: 'Tiết kiệm', textColor: 'text-ok' };
+  if (kwh <= 80) return { fill: '#fbecc9', stroke: '#c07a00', statusText: 'Trung bình', textColor: 'text-warn' };
+  return { fill: '#fbdad6', stroke: '#bd2630', statusText: 'Lãng phí cao', textColor: 'text-crit' };
 }
 
 // Coordinates map for the 10 rooms (5 North Wing rooms, 5 South Wing rooms)
@@ -138,68 +82,65 @@ export default function FloorPlan({ buildingId = 'office_tower_01', onAskCopilot
   // Map zone data by ID for instant O(1) lookup
   const zoneDataMap = new Map((zones || []).map((z) => [z.id, z]));
 
+  const segBtn = (active) =>
+    `flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-semibold transition-colors ${
+      active ? 'bg-shell text-white' : 'text-ink-2 hover:bg-sunken'
+    }`;
+
+  const legendTemp = [
+    ['#1f55cc', '#dce7fb', '<22°C (Mát)'],
+    ['#17784a', '#d9efe2', '22-25°C (Chuẩn)'],
+    ['#c07a00', '#fbecc9', '25-28°C (Ấm)'],
+    ['#bd2630', '#fbdad6', '>28°C (Nóng)'],
+  ];
+  const legendWaste = [
+    ['#17784a', '#d9efe2', '<40 kWh (Thấp)'],
+    ['#c07a00', '#fbecc9', '40-80 kWh (Vừa)'],
+    ['#bd2630', '#fbdad6', '>80 kWh (Cao)'],
+  ];
+
   return (
-    <div className="rounded-2xl border border-slate-700/80 bg-slate-900/70 p-6 backdrop-blur-xl shadow-2xl space-y-6">
+    <section className="panel">
       {/* Control Bar: Header, Metric Toggle, Stream Status */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-slate-800 pb-5">
+      <div className="panel-head gap-y-3 py-3.5">
         <div>
           <div className="flex items-center gap-2.5">
-            <h2 className="text-xl font-bold text-white tracking-tight">Sơ đồ Mặt bằng Thời gian thực</h2>
-            <span className="rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-400">
-              Tầng 1
-            </span>
+            <h2 className="panel-title text-base">Sơ đồ Mặt bằng Thời gian thực</h2>
+            <span className="chip chip-mute">Tầng 1</span>
           </div>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="meta mt-0.5">
             Mô phỏng 10 khu vực làm việc • Cập nhật tự động qua luồng Server-Sent Events (SSE)
           </p>
         </div>
 
-        {/* Right controls: Toggle & Connection status */}
         <div className="flex flex-wrap items-center gap-3">
-          {/* Mode Switcher */}
-          <div className="flex items-center rounded-xl bg-slate-800/80 p-1 border border-slate-700/80 shadow-inner">
+          <div className="flex items-center gap-1 rounded-md border border-line-strong bg-panel p-1" role="group" aria-label="Chỉ số hiển thị">
             <button
               id="mode-toggle-temp"
               onClick={() => setMetricMode('temp')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                metricMode === 'temp'
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
+              aria-pressed={metricMode === 'temp'}
+              className={segBtn(metricMode === 'temp')}
             >
-              <Thermometer size={14} />
+              <Thermometer size={14} aria-hidden="true" />
               <span>Nhiệt độ</span>
             </button>
             <button
               id="mode-toggle-waste"
               onClick={() => setMetricMode('waste')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                metricMode === 'waste'
-                  ? 'bg-gradient-to-r from-amber-500 to-rose-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
+              aria-pressed={metricMode === 'waste'}
+              className={segBtn(metricMode === 'waste')}
             >
-              <Zap size={14} />
+              <Zap size={14} aria-hidden="true" />
               <span>Lãng phí</span>
             </button>
           </div>
 
-          {/* Connection Indicator */}
           <div
             id="stream-connection-badge"
-            className={`flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-medium transition ${
-              isConnected
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-                : 'border-rose-500/30 bg-rose-500/10 text-rose-400 animate-pulse'
-            }`}
+            className={`chip px-2.5 py-1.5 text-xs ${isConnected ? 'chip-ok' : 'chip-crit'}`}
             title={isConnected ? 'Đang kết nối live stream' : 'Mất kết nối với SSE server'}
           >
-            <span
-              className={`h-2 w-2 rounded-full ${
-                isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'
-              }`}
-            />
-            <Radio size={13} className={isConnected ? 'animate-pulse' : ''} />
+            <Radio size={13} className={isConnected ? 'animate-pulse' : ''} aria-hidden="true" />
             <span>
               {isConnected ? 'Trực tuyến' : `Mất kết nối${retryAttempt > 0 ? ` (thử lại #${retryAttempt})` : ''}`}
             </span>
@@ -209,61 +150,40 @@ export default function FloorPlan({ buildingId = 'office_tower_01', onAskCopilot
 
       {/* Error Banner */}
       {error && (
-        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-400 flex items-center gap-2">
-          <Info size={14} />
+        <div role="alert" className="m-4 flex items-center gap-2 rounded-md border border-crit/30 bg-crit-bg p-3 text-xs text-crit">
+          <Info size={14} aria-hidden="true" />
           <span>Lỗi tải sơ đồ: {error}</span>
         </div>
       )}
 
       {/* SVG Floor Plan Canvas */}
-      <div className="relative rounded-xl border border-slate-800 bg-slate-950/80 p-4 overflow-hidden shadow-inner flex items-center justify-center">
+      <div className="relative m-4 overflow-hidden rounded border border-line-strong bg-white p-3">
         {loading && (
-          <div className="absolute inset-0 bg-slate-950/80 flex items-center justify-center z-10 backdrop-blur-sm text-sm text-slate-300">
-            <span className="animate-spin mr-2">⚙️</span> Đang tải sơ đồ mặt bằng...
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/85 text-sm text-ink-2" aria-busy="true">
+            <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-line border-t-shell" aria-hidden="true" />
+            Đang tải sơ đồ mặt bằng...
           </div>
         )}
 
         <svg
           viewBox="0 0 1010 540"
-          className="w-full h-auto max-h-[580px] select-none"
+          className="h-auto max-h-[580px] w-full select-none"
           role="img"
           aria-label="Sơ đồ mặt bằng toà nhà Tầng 1"
         >
-          {/* Architectural Outer Boundary Wall */}
-          <rect
-            x="15"
-            y="15"
-            width="980"
-            height="510"
-            rx="16"
-            fill="none"
-            stroke="#334155"
-            strokeWidth="3"
-            strokeDasharray="6 4"
-          />
+          {/* Outer wall: heavy architectural line */}
+          <rect x="15" y="15" width="980" height="510" fill="none" stroke="#0e1e1d" strokeWidth="5" />
 
-          {/* Central Hallway / Atrium Area */}
-          <rect
-            x="30"
-            y="238"
-            width="950"
-            height="64"
-            rx="8"
-            fill="rgba(30, 41, 59, 0.4)"
-            stroke="#1e293b"
-            strokeWidth="1"
-          />
-          <text
-            x="505"
-            y="275"
-            textAnchor="middle"
-            fill="#64748b"
-            fontSize="12"
-            letterSpacing="3"
-            fontWeight="600"
-            className="uppercase"
-          >
-            Hành Lang Trung Tâm • Tầng 1 (Central Corridor)
+          {/* Central corridor, hatched like a drawing's circulation space */}
+          <defs>
+            <pattern id="corridor-hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <line x1="0" y1="0" x2="0" y2="10" stroke="#c9d3cf" strokeWidth="1.5" />
+            </pattern>
+          </defs>
+          <rect x="30" y="238" width="950" height="64" fill="url(#corridor-hatch)" stroke="#a9b8b3" strokeWidth="1" />
+          <rect x="360" y="256" width="290" height="28" fill="#ffffff" />
+          <text x="505" y="275" textAnchor="middle" fill="#3b4d4a" fontSize="12" letterSpacing="2.5" fontWeight="600">
+            HÀNH LANG TRUNG TÂM • TẦNG 1
           </text>
 
           {/* 10 Interactive Zones */}
@@ -276,11 +196,9 @@ export default function FloorPlan({ buildingId = 'office_tower_01', onAskCopilot
             };
             const reading = zoneData.latest_reading || {};
 
-            // Metric values
             const tempVal = reading.outdoor_temperature_c;
             const kwhVal = reading.meter_reading_kwh;
 
-            // Appearance calculations
             const style =
               metricMode === 'temp'
                 ? getTempColorAndStatus(tempVal)
@@ -295,6 +213,8 @@ export default function FloorPlan({ buildingId = 'office_tower_01', onAskCopilot
                 ? `${kwhVal.toFixed(1)} kWh`
                 : '-- kWh';
 
+            const northRow = layout.y < 200;
+
             return (
               <g
                 key={layout.id}
@@ -308,105 +228,98 @@ export default function FloorPlan({ buildingId = 'office_tower_01', onAskCopilot
                     setSelectedZone(zoneData);
                   }
                 }}
-                className="cursor-pointer transition-all duration-300 focus:outline-none group"
+                className="group cursor-pointer focus:outline-none"
               >
-                {/* Room Rectangle with reactive gradient fill */}
+                {/* Room: tinted by state, walled in ink */}
                 <rect
                   x={layout.x}
                   y={layout.y}
                   width={layout.w}
                   height={layout.h}
-                  rx="12"
                   fill={style.fill}
-                  stroke={style.stroke}
-                  strokeWidth="2"
-                  className="transition-all duration-500 group-hover:stroke-white group-hover:filter group-hover:drop-shadow-[0_0_12px_rgba(255,255,255,0.2)] group-focus:stroke-white"
+                  stroke="#0e1e1d"
+                  strokeWidth="2.5"
+                  className="transition-colors duration-500"
                 />
-
-                {/* Subtle Room Header Bar */}
+                {/* State edge on the corridor side of the room */}
                 <rect
                   x={layout.x}
-                  y={layout.y}
+                  y={northRow ? layout.y + layout.h - 6 : layout.y}
                   width={layout.w}
-                  height="34"
-                  rx="12"
-                  fill="rgba(15, 23, 42, 0.45)"
+                  height="6"
+                  fill={style.stroke}
+                />
+                {/* Hover / focus ring */}
+                <rect
+                  x={layout.x - 5}
+                  y={layout.y - 5}
+                  width={layout.w + 10}
+                  height={layout.h + 10}
+                  fill="none"
+                  stroke="#1f55cc"
+                  strokeWidth="3"
+                  className="opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus:opacity-100"
                 />
 
-                {/* Room Name */}
                 <text
                   x={layout.x + 14}
-                  y={layout.y + 22}
-                  fill="#f8fafc"
-                  fontSize="12.5"
-                  fontWeight="600"
+                  y={layout.y + 26}
+                  fill="#0e1e1d"
+                  fontSize="13"
+                  fontWeight="700"
                   className="pointer-events-none"
                 >
                   {zoneData.name || layout.label}
                 </text>
-
-                {/* Room ID Tag */}
                 <text
-                  x={layout.x + layout.w - 14}
-                  y={layout.y + 22}
+                  x={layout.x + layout.w - 12}
+                  y={layout.y + 26}
                   textAnchor="end"
-                  fill="#94a3b8"
-                  fontSize="10"
-                  fontFamily="monospace"
+                  fill="#3b4d4a"
+                  fontSize="10.5"
+                  fontFamily="'JetBrains Mono', monospace"
                   className="pointer-events-none"
                 >
                   {layout.id}
                 </text>
 
-                {/* Main Metric Value */}
                 <text
                   x={layout.x + layout.w / 2}
-                  y={layout.y + 95}
+                  y={layout.y + 88}
                   textAnchor="middle"
-                  fill="#ffffff"
-                  fontSize="22"
-                  fontWeight="bold"
-                  className="pointer-events-none filter drop-shadow-sm transition-all duration-300"
+                  fill="#0e1e1d"
+                  fontSize="24"
+                  fontWeight="600"
+                  fontFamily="'JetBrains Mono', monospace"
+                  letterSpacing="-0.5"
+                  className="pointer-events-none"
                 >
                   {displayValue}
                 </text>
 
-                {/* Status Badge Box (Dual-indicator: Color + Text a11y) */}
-                <rect
-                  x={layout.x + layout.w / 2 - 45}
-                  y={layout.y + 120}
-                  width="90"
-                  height="22"
-                  rx="6"
-                  fill="rgba(15, 23, 42, 0.7)"
-                  stroke={style.stroke}
-                  strokeWidth="1"
-                  className="pointer-events-none"
-                />
+                {/* Status as a word: colour is never the only signal */}
                 <text
                   x={layout.x + layout.w / 2}
-                  y={layout.y + 135}
+                  y={layout.y + 118}
                   textAnchor="middle"
-                  fill="#f1f5f9"
-                  fontSize="10"
-                  fontWeight="500"
+                  fill="#0e1e1d"
+                  fontSize="12.5"
+                  fontWeight="600"
                   className="pointer-events-none"
                 >
                   {style.statusText}
                 </text>
 
-                {/* Call-to-action hint on hover */}
                 <text
                   x={layout.x + layout.w / 2}
-                  y={layout.y + 162}
+                  y={layout.y + 146}
                   textAnchor="middle"
-                  fill="#38bdf8"
-                  fontSize="9.5"
-                  fontWeight="500"
-                  opacity="0"
-                  className="transition-opacity duration-200 group-hover:opacity-100 group-focus:opacity-100 pointer-events-none"
+                  fill="#1f55cc"
+                  fontSize="11"
+                  fontWeight="600"
+                  className="pointer-events-none opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus:opacity-100"
                 >
-                  🔍 Nhấn xem & hỏi AI →
+                  Xem chi tiết &amp; hỏi AI →
                 </text>
               </g>
             );
@@ -414,60 +327,29 @@ export default function FloorPlan({ buildingId = 'office_tower_01', onAskCopilot
         </svg>
       </div>
 
-      {/* Legend & Guide Bar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-xs">
-        <div className="text-slate-400">
-          <span className="font-semibold text-slate-200">Ghi chú dải màu ({metricMode === 'temp' ? 'Nhiệt độ' : 'Lãng phí'}):</span>{' '}
-          Mỗi khu vực được thể hiện song song qua màu sắc và văn bản trực quan.
+      {/* Legend */}
+      <div className="flex flex-col items-start justify-between gap-3 border-t border-line px-4 py-3 text-xs sm:flex-row sm:items-center">
+        <div className="text-muted">
+          <span className="font-semibold text-ink">Dải màu ({metricMode === 'temp' ? 'Nhiệt độ' : 'Lãng phí'}):</span>{' '}
+          mỗi khu vực thể hiện song song bằng màu sắc và chữ.
         </div>
 
-        {/* Legend Scale */}
-        <div className="flex items-center gap-3">
-          {metricMode === 'temp' ? (
-            <>
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <span className="h-3 w-3 rounded-full bg-sky-500/80 border border-sky-400" />
-                &lt;22°C (Mát)
-              </span>
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <span className="h-3 w-3 rounded-full bg-emerald-500/80 border border-emerald-400" />
-                22-25°C (Chuẩn)
-              </span>
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <span className="h-3 w-3 rounded-full bg-amber-500/80 border border-amber-400" />
-                25-28°C (Ấm)
-              </span>
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <span className="h-3 w-3 rounded-full bg-rose-500/80 border border-rose-400" />
-                &gt;28°C (Nóng)
-              </span>
-            </>
-          ) : (
-            <>
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <span className="h-3 w-3 rounded-full bg-emerald-500/80 border border-emerald-400" />
-                &lt;40 kWh (Thấp)
-              </span>
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <span className="h-3 w-3 rounded-full bg-amber-500/80 border border-amber-400" />
-                40-80 kWh (Vừa)
-              </span>
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <span className="h-3 w-3 rounded-full bg-rose-500/80 border border-rose-400" />
-                &gt;80 kWh (Cao)
-              </span>
-            </>
-          )}
-        </div>
+        <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          {(metricMode === 'temp' ? legendTemp : legendWaste).map(([stroke, fill, text]) => (
+            <li key={text} className="flex items-center gap-1.5 text-ink-2">
+              <span className="h-3 w-3 border-2" style={{ background: fill, borderColor: stroke }} aria-hidden="true" />
+              {text}
+            </li>
+          ))}
+        </ul>
       </div>
 
-      {/* Zone Detail Modal Dialog */}
       <ZoneDetailModal
         zone={selectedZone}
         isOpen={Boolean(selectedZone)}
         onClose={() => setSelectedZone(null)}
         onAskCopilot={onAskCopilot}
       />
-    </div>
+    </section>
   );
 }

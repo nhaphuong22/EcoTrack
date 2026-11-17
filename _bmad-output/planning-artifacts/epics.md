@@ -48,6 +48,19 @@ story410Refinement:
     - _bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/addendum.md
     - _bmad-output/planning-artifacts/architecture/architecture-EcoTrack-2026-09-23/ARCHITECTURE-SPINE.md
     - _bmad-output/planning-artifacts/epics.md
+story411Refinement:
+  scope: 4-11-expose-model-monitoring-to-admins
+  stepsCompleted:
+    - step-01-validate-prerequisites
+    - step-02-design-epics
+    - step-03-create-stories
+    - step-04-final-validation
+  status: completed
+  inputDocuments:
+    - _bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/prd.md
+    - _bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/addendum.md
+    - _bmad-output/planning-artifacts/architecture/architecture-EcoTrack-2026-09-23/ARCHITECTURE-SPINE.md
+    - _bmad-output/planning-artifacts/epics.md
 inputDocuments:
   - plan.md
   - _bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/prd.md
@@ -213,6 +226,31 @@ Epic placement approved by the product owner on 2026-11-17; the global epic list
 2. **Honest `trained_at` Timestamp (ISO 8601 UTC, NFR7):** Derive `trained_at` from the MLflow run timestamp (`end_time` / `start_time` / `creation_timestamp`) formatted in ISO 8601 UTC (`Z`). On `local` fallback, read `train_end_timestamp` from `model_metadata.json` when present and return `null` when absent rather than fabricating a training date from file `mtime` (which reflects container build/copy time).
 3. **Verbatim Benchmark Payload (~16 KB):** Return the parsed `experiments/benchmark/results.json` object verbatim when present (or `null` when absent), avoiding unnecessary projection layers while supporting an optional path/env override (`ECOTRACK_BENCHMARK_RESULTS_PATH` / function parameter) for offline tests.
 4. **Per-Section Disk Error Isolation & Safe Serialization:** Missing artifact files return `null` (`drift`, `anomaly_quality`, `benchmark`) or `[]` (`retrain_history`). If a persisted JSON file exists on disk but is corrupt/invalid, preserve fail-loud behavior in `load_drift_status()` / `load_retrain_history()` for scheduler/retrain callers while catching and logging the read error in the status aggregator, returning `null`/`[]` for that section alongside a per-section entry in `errors` while still keeping HTTP 200. Sort `retrain_history` stably by `timestamp` descending (newest first) and sanitize/reject non-finite floats (`NaN`/`Inf`) so JSON serialization never fails.
+
+## Story 4.11 refinement — Requirements extraction (2026-11-17)
+
+Scoped pass for Story 4.11; reuses the existing inventory and epic structure. No UX contract applies (gateway only).
+
+### Functional requirements in scope
+
+- **FR40:** The gateway proxies `GET /api/v1/mlops/status` → `GET /internal/mlops/status` (Story 4.10) and `POST /api/v1/mlops/retrain` → `POST /internal/mlops/retrain` (Story 4.8). The `ADMIN`-only gate on retrain is Epic 5 (Story 5.3), not this story.
+- Gateway uses the existing `callAIService` client (injects `X-Internal-Token`, 30 s timeout; unreachable → 502, timeout → 504).
+- Out of scope: UI (Story 4.12), RBAC (Epic 5).
+
+### Confirmed clarifications
+
+- **409/202 pass-through:** `POST /api/v1/mlops/retrain` forwards the AI service's 202 and 409 status and body verbatim (including `run_id`), so Story 4.12 can show "running". Only true failures (502 unreachable, 504 timeout) use the standard error envelope.
+- **Status passthrough:** Status payload is forwarded unchanged; `champion.status` of `broken`/`unavailable` still returns HTTP 200.
+- **Placement:** Keep Story 4.11 as-is within Epic 4; add ACs for 409 body pass-through, 504 timeout and non-error champion states. No new story.
+
+Requirements confirmed by the product owner (`C`) on 2026-11-17.
+
+### Epic placement and Party Mode refinements (2026-11-17)
+
+- Story 4.11 stays in **Epic 4**; FR40 coverage map unchanged.
+- Only upstream 202 and 409 are forwarded verbatim (status and body). Any other upstream 4xx/5xx becomes a 502 standard envelope with `upstream_status` and a fixed per-status `message`; the upstream body is logged server-side only. Timeout stays 504.
+- `POST /retrain` never forwards the client body.
+- `GET /status` gets a short in-memory cache (proposed TTL 5 s), cleared after a retrain call. `POST /retrain` has its own rate limit returning 429 (proposed 3/min). Both values come from env vars; reuse existing backend facilities, no new dependency unless none exists.
 
 ## Overview
 
@@ -1135,7 +1173,7 @@ So that the monitoring page can show it without knowing MLflow internals.
 
 **Given** MLflow is disabled (`ECOTRACK_DISABLE_MLFLOW`), uninitialized, or has no `champion` alias set
 **When** status is requested
-**Then** the aggregator inspects metadata lightly without deserializing the XGBoost binary and falls back to `get_models_dir()`: when `xgboost_forecaster.joblib` or `model_metadata.json` (`xgboost_metrics`) is available, `champion` reports `source: "local"`, `status: "fallback"`, `version: "local"`, `metrics` from `xgboost_metrics`, and `trained_at` from `train_end_timestamp` in ISO 8601 UTC (`null` when absent, never fabricated from file `mtime`); when no local model exists either, `champion` reports `status: "unavailable"`, `version: null`, `trained_at: null`, `metrics: null`, and the endpoint still responds HTTP 200
+**Then** the aggregator inspects metadata lightly without deserializing the XGBoost binary and falls back to `get_models_dir()`: when `xgboost_forecaster.joblib` is present on disk, `champion` reports `source: "local"`, `status: "fallback"`, `version: "local"`, `metrics` from `model_metadata.json` (`xgboost_metrics` when present), and `trained_at` from `train_end_timestamp` in ISO 8601 UTC (`null` when absent, never fabricated from file `mtime`); when `xgboost_forecaster.joblib` is absent, `champion` reports `status: "unavailable"`, `version: null`, `trained_at: null`, `metrics: null`, and the endpoint still responds HTTP 200
 
 **Given** an MLflow `champion` alias resolves but the SQLite registry fails (e.g., locked) or the champion artifact is missing/unreadable
 **When** status is requested
@@ -1159,21 +1197,44 @@ As an admin,
 I want model status and retraining available through the gateway,
 So that the monitoring page uses the same protected API as everything else.
 
-**Implements:** FR40
+**Implements:** FR40 (builds on FR25 via Story 4.8, FR26 via Story 4.10)
 
 **Acceptance Criteria:**
 
 **Given** a client (the `ADMIN`/`MANAGER` role gate is added in Epic 5, Story 5.3)
 **When** it calls `GET /api/v1/mlops/status`
-**Then** the gateway returns the AI service's status payload
+**Then** the gateway calls `GET /internal/mlops/status` via `callAIService` and returns the payload unchanged
+**And** a `champion.status` of `"fallback"`, `"unavailable"` or `"broken"` is still returned as HTTP 200, never converted into an error
+
+**Given** a status response was served within the cache TTL (`MLOPS_STATUS_CACHE_TTL_SECONDS`, default 5)
+**When** `GET /api/v1/mlops/status` is called again
+**Then** the cached payload is returned without calling the AI service
+**And** the cache is cleared after any `POST /api/v1/mlops/retrain` call so the next status reflects the new run
 
 **Given** a client
 **When** it calls `POST /api/v1/mlops/retrain`
-**Then** the gateway forwards it and returns the AI service's 202 or 409 response
+**Then** the gateway forwards `POST /internal/mlops/retrain` with no request body and returns the AI service's 202 or 409 status and body verbatim (including `run_id`)
+
+**Given** a client exceeds the retrain rate limit (`MLOPS_RETRAIN_RATE_LIMIT_PER_MINUTE`, default 3)
+**When** it calls `POST /api/v1/mlops/retrain` again
+**Then** the gateway responds 429 with the standard error envelope without calling the AI service
 
 **Given** the AI service is unreachable
 **When** either endpoint is called
 **Then** the gateway responds 502 with the standard error envelope
+
+**Given** the AI service does not answer within the client timeout
+**When** either endpoint is called
+**Then** the gateway responds 504 with the standard error envelope
+
+**Given** the AI service responds with any other non-2xx status (for example 401 from a token mismatch or 500)
+**When** either endpoint is called
+**Then** the gateway responds 502 with the standard error envelope containing `upstream_status` and a fixed per-status `message`
+**And** the upstream response body is logged server-side only and never returned to the client
+
+**Given** the gateway test suite
+**When** the Story 4.11 tests run with the AI service mocked
+**Then** they cover status pass-through (including `broken`), cache hit and cache clear after retrain, 202 and 409 verbatim forwarding, retrain sent without a body, 429 rate limit, 502 unreachable, 504 timeout, and upstream 401/500 mapped to 502 without leaking the body
 
 ### Story 4.12: Monitor the model as an admin
 

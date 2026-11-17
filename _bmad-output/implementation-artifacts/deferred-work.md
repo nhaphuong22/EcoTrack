@@ -33,4 +33,16 @@
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-10-report-model-and-drift-status.md`
   summary: `register_and_bootstrap_champion` constructs `MlflowClient()` without passing `tracking_uri` (`ai-service/src/mlops/tracking.py:124`) and `champion_health` maps unexpected exceptions to `"unavailable"` instead of `"broken"` (`ai-service/src/mlops/tracking.py:394-395`).
-  evidence: Pre-existing Story 4.5 code untouched by Story 4.10; `register_and_bootstrap_champion` callers invoke `configure(tracking_uri)` beforehand, and `champion_health` keeps Story 4.5 `/health` behavior unchanged. (blind-hunter finding #10, pre-existing)
+  evidence: Pre-existing Story 4.5 code carried from the dirty worktree prior to Story 4.10; `register_and_bootstrap_champion` callers invoke `configure(tracking_uri)` beforehand, and `champion_health` keeps Story 4.5 `/health` behavior unchanged. (blind-hunter finding #10)
+
+## Deferred from: code review of spec-4-10-report-model-and-drift-status (2026-11-17)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-10-report-model-and-drift-status.md`
+  summary: `tests/test_smoke.py::test_api_forecast_predict_warm_p95` exceeded the 300 ms p95 budget (`319.5 ms` in full run, `399.7 ms` standalone on Windows).
+  evidence: Pre-existing Story 1.4/1.5 `/internal/forecast/predict` latency test not modified by Story 4.10 (`acceptance-auditor` note).
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-10-report-model-and-drift-status.md`
+  summary: `register_and_bootstrap_champion` omits `tracking_uri` on `MlflowClient()` (`ai-service/src/mlops/tracking.py:126`) and `champion_health` maps unexpected exceptions to `"unavailable"` instead of `"broken"` (`ai-service/src/mlops/tracking.py:394-395`).
+  evidence: Pre-existing Story 4.5 code carried from the dirty worktree prior to Story 4.10 (`blind-hunter` finding #6).
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-10-report-model-and-drift-status.md`
+  summary: `anomaly_quality.merge_into_metadata()` writes `model_metadata.json` via a fixed `.json.tmp` sibling path without holding a shared metadata lock (`ai-service/src/mlops/anomaly_quality.py:126`).
+  evidence: Pre-existing Story 4.7 code outside Story 4.10 diff (`blind-hunter` finding #8).

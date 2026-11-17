@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-08-2026 21:56
-last_updated: 11-17-2026 21:02
+last_updated: 11-17-2026 23:20
 project: EcoTrack
 project_key: NOKEY
 tracking_system: file-system
@@ -72,8 +72,8 @@ development_status:
   4-7-measure-anomaly-detector-quality: done
   4-8-retrain-on-demand-with-guarded-promotion: done
   4-9-retrain-automatically-when-the-model-degrades: done
-  4-10-report-model-and-drift-status: review
-  4-11-expose-model-monitoring-to-admins: backlog
+  4-10-report-model-and-drift-status: done
+  4-11-expose-model-monitoring-to-admins: done
   4-12-monitor-the-model-as-an-admin: backlog
   4-13-forecast-with-learned-prediction-intervals: backlog
   epic-4-retrospective: optional

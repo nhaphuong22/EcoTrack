@@ -94,6 +94,37 @@ def test_mlflow_not_initialised_falls_back_with_warning(tmp_path, monkeypatch, c
     reset_serving_cache()
 
 
+def test_initialised_store_without_champion_alias_falls_back(tmp_path, monkeypatch, caplog):
+    """An initialised store whose registry has no `champion` alias must fall back to
+    models_saved/ (not 503). This exercises the get_model_version_by_alias -> MlflowException
+    -> _is_not_found -> ChampionUnavailable branch that the other cases never reach, so a
+    misclassified 'alias not found' would take the service down at startup."""
+    db = tmp_path / "mlflow.db"
+    artifacts = tmp_path / "artifacts"
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{db.as_posix()}")
+    monkeypatch.setenv("MLFLOW_ARTIFACT_ROOT", str(artifacts.as_posix()))
+    monkeypatch.delenv("ECOTRACK_DISABLE_MLFLOW", raising=False)
+
+    from src.mlops.config import REGISTERED_MODEL_NAME
+    from src.mlops.tracking import configure
+
+    # Initialise the store and register a version WITHOUT setting the champion alias.
+    configure()
+    with mlflow.start_run() as run:
+        info = mlflow.xgboost.log_model(_tiny_model(), artifact_path="model")
+    mlflow.register_model(info.model_uri, REGISTERED_MODEL_NAME)
+    reset_serving_cache()
+
+    models_dir = Path(__import__("os").environ["ECOTRACK_MODELS_DIR"])
+    xgb_path = models_dir / "xgboost_forecaster.joblib"
+
+    with caplog.at_level(logging.WARNING, logger="ServingFrame"):
+        model = _load_champion_forecaster_or_fallback(xgb_path)
+    assert hasattr(model, "predict")  # fell back to models_saved/, not a 503
+    assert any("falling back to models_saved" in rec.message for rec in caplog.records)
+    reset_serving_cache()
+
+
 def test_broken_champion_raises_model_artifact_error(champion_store):
     # Alias resolves but the artifact files are gone -> fail loud, no fallback.
     shutil.rmtree(champion_store["artifacts"], ignore_errors=True)

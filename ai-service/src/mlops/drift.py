@@ -157,6 +157,7 @@ def check(
     reference_df: pd.DataFrame,
     recent_df: pd.DataFrame,
     champion_model: Any = None,
+    resolve_champion: bool = True,
 ) -> Dict[str, Any]:
     """
     Compares ``reference_df`` (the champion's training split) against
@@ -173,11 +174,13 @@ def check(
     ``rec_n``/``insufficient_data`` so a result can be judged for statistical
     power or told apart from "checked, genuinely no drift" later.
 
-    When ``champion_model`` is omitted, it is resolved the same way serving
-    resolves it (MLflow champion, else ``models_saved/``) via
-    :func:`_resolve_champion_for_drift`, which never raises: any resolution
-    failure simply skips the rolling-MAPE signal (``None``) rather than
-    failing the whole check.
+    When ``champion_model`` is omitted and ``resolve_champion`` is true, it is
+    resolved the same way serving resolves it (MLflow champion, else
+    ``models_saved/``) via :func:`_resolve_champion_for_drift`, which never
+    raises: any resolution failure simply skips the rolling-MAPE signal
+    (``None``) rather than failing the whole check. Scoped callers that already
+    attempted resolution can pass ``resolve_champion=False`` to prevent falling
+    back to the global store.
     """
     reference_df = _ensure_engineered(reference_df)
     recent_df = _ensure_engineered(recent_df)
@@ -190,7 +193,7 @@ def check(
         if result["p_value"] < DRIFT_KS_PVALUE_THRESHOLD and result["psi"] > DRIFT_PSI_THRESHOLD:
             triggered.append(column)
 
-    if champion_model is None:
+    if champion_model is None and resolve_champion:
         champion_model = _resolve_champion_for_drift()
 
     rolling_mape = _rolling_mape(recent_df, champion_model)

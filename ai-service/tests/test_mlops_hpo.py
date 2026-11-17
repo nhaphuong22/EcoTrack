@@ -143,6 +143,21 @@ def test_search_is_deterministic_under_fixed_seed(splits, tmp_path):
     assert r1["best_value"] == pytest.approx(r2["best_value"])
 
 
+def test_lstm_time_budget_stops_before_first_epoch(splits):
+    """The per-trial wall-clock cap (the elapsed-time break in the epoch loop) really stops
+    training. A zero budget makes the check at the top of the loop fire deterministically, so
+    no epoch runs — guarding the ~5-min OPTUNA_TRIAL_TIMEOUT_S cap against silent breakage."""
+    pytest.importorskip("torch")
+    from experiments.benchmark.lstm import LSTMForecaster
+
+    train_df, _ = splits
+    model = LSTMForecaster(hidden_size=8, num_layers=1, max_epochs=50)
+    model.set_time_budget(0)  # 0s budget: elapsed >= 0 trips on the first loop iteration
+    model.fit(train_df.iloc[:700])
+
+    assert model._epochs_run == 0
+
+
 @pytest.mark.slow
 def test_lstm_study_smoke(splits, tmp_path):
     """A minimal LSTM study exercises the set_params + per-trial time-budget path."""

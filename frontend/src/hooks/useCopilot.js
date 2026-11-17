@@ -12,9 +12,14 @@ export function useCopilot() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError]         = useState(null);
   const historyRef = useRef([]);
+  const sessionRef = useRef(null);
+  const generationRef = useRef(0);
+  const pendingRef = useRef(false);
 
   const sendMessage = useCallback(async (userMessage) => {
-    if (!userMessage.trim()) return;
+    if (!userMessage.trim() || pendingRef.current) return;
+    pendingRef.current = true;
+    const generation = generationRef.current;
 
     const userEntry = { role: 'user', content: userMessage, tools_used: [] };
     setMessages(prev => [...prev, userEntry]);
@@ -25,8 +30,11 @@ export function useCopilot() {
       const data = await sendCopilotMessage(
         userMessage,
         'office_tower_01',
-        historyRef.current
+        historyRef.current,
+        sessionRef.current || undefined
       );
+      if (generation !== generationRef.current) return;
+      sessionRef.current = data.session_id;
       const assistantEntry = {
         role: 'assistant',
         content: data.reply,
@@ -39,13 +47,22 @@ export function useCopilot() {
         { role: 'assistant', content: data.reply },
       ].slice(-10); // Keep last 5 turns (10 entries)
     } catch (err) {
+      if (generation !== generationRef.current) return;
       setError('Không thể kết nối đến Copilot. Vui lòng thử lại.');
     } finally {
-      setIsLoading(false);
+      if (generation === generationRef.current) {
+        pendingRef.current = false;
+        setIsLoading(false);
+      }
     }
   }, []);
 
   const clearHistory = useCallback(() => {
+    generationRef.current += 1;
+    sessionRef.current = null;
+    pendingRef.current = false;
+    setIsLoading(false);
+    setError(null);
     historyRef.current = [];
     setMessages([{
       role: 'assistant',

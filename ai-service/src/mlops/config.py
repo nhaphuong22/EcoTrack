@@ -15,11 +15,21 @@ from __future__ import annotations
 
 import math
 import os
+import threading
 from pathlib import Path
+from typing import Optional
 
 
 # ai-service/src/mlops/config.py -> parents[2] == ai-service/
 AI_SERVICE_DIR: Path = Path(__file__).resolve().parents[2]
+
+# Shared MLOps state filenames and intra-process locks (kept in config.py so
+# lightweight readers like status.py avoid importing heavy ML training stacks).
+DRIFT_STATUS_FILENAME: str = "drift_status.json"
+RETRAIN_HISTORY_FILENAME: str = "retrain_history.json"
+DRIFT_STATUS_LOCK = threading.Lock()
+HISTORY_LOCK = threading.Lock()
+METADATA_LOCK = threading.RLock()
 
 # Registry identity. One registered model holds every tracked forecaster
 # version; the serving model is the one carrying the `champion` alias.
@@ -121,10 +131,14 @@ def is_mlflow_initialised(tracking_uri: str | None = None) -> bool:
     """
     if not mlflow_available():
         return False
-    uri = tracking_uri or get_tracking_uri()
+    clean = tracking_uri.strip() if isinstance(tracking_uri, str) else ""
+    uri = clean or get_tracking_uri()
     db_path = _sqlite_path_from_uri(uri)
     if db_path is not None:
-        return db_path.is_file() and db_path.stat().st_size > 0
+        try:
+            return db_path.is_file() and db_path.stat().st_size > 0
+        except OSError:
+            return False
     return True
 
 
@@ -147,8 +161,8 @@ def validate_duration_seconds(
     allow_zero: bool = True,
 ) -> float:
     """Validate and normalize a finite duration in seconds without coercing booleans."""
-    if isinstance(value, bool):
-        raise ValueError(f"{name} must be a finite number, not bool; got {value!r}")
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ValueError(f"{name} must be a finite number; got {value!r}")
     val = float(value)
     if not math.isfinite(val):
         raise ValueError(f"{name} must be a finite number; got {value!r}")
@@ -185,3 +199,19 @@ def get_benchmark_results_path() -> Path:
     """Path to benchmark ``results.json`` (overridable via ``ECOTRACK_BENCHMARK_RESULTS_PATH``)."""
     val = os.getenv("ECOTRACK_BENCHMARK_RESULTS_PATH", "").strip()
     return Path(val) if val else AI_SERVICE_DIR / "experiments" / "benchmark" / "results.json"
+
+
+def optional_path(value: Optional[Path | str]) -> Optional[Path]:
+    """Normalize ``None`` or blank string overrides to ``None`` rather than ``Path('.')``."""
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    return Path(value)
+
+
+def optional_str(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None

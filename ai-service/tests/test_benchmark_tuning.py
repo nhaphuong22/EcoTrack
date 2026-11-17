@@ -16,6 +16,9 @@ pytest.importorskip("statsmodels")
 
 from experiments.benchmark.models import XGBoostForecaster
 from experiments.benchmark.run_benchmark import build_tuned_models
+from src.models.train_models import engineer_features, load_dataset, split_time_series_data
+
+FIXTURE_CSV = Path(__file__).resolve().parent / "fixtures" / "office_building_sample.csv"
 
 
 def test_xgboost_set_params_overrides_and_rebuilds():
@@ -44,3 +47,28 @@ def test_build_tuned_models_applies_only_keyed_models(tmp_path):
     # ...while an un-keyed model keeps its defaults (no overrides applied).
     lstm = by_name["lstm"]
     assert lstm._overrides == {}
+
+
+def test_lstm_set_params_overrides_reach_network():
+    """The tuned LSTM architecture must actually reach the built network, not just _overrides.
+
+    Without this, a silent no-op in _hp/fit would train an identical-architecture net for
+    every trial and make the tuned benchmark row equal the untuned one while labeled 'tuned'.
+    """
+    from experiments.benchmark.lstm import LSTMForecaster
+
+    df = engineer_features(load_dataset(FIXTURE_CSV))
+    train_df, _ = split_time_series_data(df, train_ratio=0.8)
+
+    model = LSTMForecaster()
+    # Non-default architecture + optimiser params, and 1 epoch to keep the fit fast.
+    model.set_params(hidden_size=8, num_layers=2, batch_size=32, learning_rate=5e-3, max_epochs=1)
+    model.fit(train_df)
+
+    assert model._net is not None
+    # Architecture overrides reached the actual nn.LSTM.
+    assert model._net.lstm.hidden_size == 8
+    assert model._net.lstm.num_layers == 2
+    # Optimiser-side overrides are resolved from the same _overrides dict.
+    assert int(model._hp("batch_size", -1)) == 32
+    assert float(model._hp("learning_rate", -1.0)) == pytest.approx(5e-3)

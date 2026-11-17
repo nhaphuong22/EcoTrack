@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -24,10 +23,15 @@ import pandas as pd
 from src.config import get_data_path, get_models_dir
 from src.mlops import drift
 from src.mlops.config import (
+    DRIFT_STATUS_FILENAME,
+    DRIFT_STATUS_LOCK as _drift_status_lock,
     get_drift_recent_path,
     get_scheduler_initial_delay_seconds,
     get_scheduler_interval_seconds,
+    optional_path as _optional_path,
+    optional_str as _optional_str,
     scheduler_enabled,
+    validate_duration_seconds,
 )
 from src.mlops.retrain import (
     RetrainAlreadyRunningError,
@@ -40,16 +44,14 @@ from src.models.train_models import engineer_features, load_dataset, split_time_
 
 logger = logging.getLogger("MLOpsScheduler")
 
-DRIFT_STATUS_FILENAME = "drift_status.json"
-
-_drift_status_lock = threading.Lock()
 _scheduler_lock = threading.Lock()
 _stop_event: Optional[threading.Event] = None
 _scheduler_thread: Optional[threading.Thread] = None
 
 
-def _drift_status_path(models_dir: Optional[Path] = None) -> Path:
-    base = Path(models_dir) if models_dir is not None else get_models_dir()
+def _drift_status_path(models_dir: Optional[Path | str] = None) -> Path:
+    resolved = _optional_path(models_dir)
+    base = resolved if resolved is not None else get_models_dir()
     return base / DRIFT_STATUS_FILENAME
 
 
@@ -81,15 +83,16 @@ def _classify_trigger(triggered_signals: List[str]) -> str:
 def _resolve_windows(
     reference_df: Optional[pd.DataFrame],
     recent_df: Optional[pd.DataFrame],
-    data_path: Optional[Path],
-    recent_path: Optional[Path],
+    data_path: Optional[Path | str],
+    recent_path: Optional[Path | str],
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     base_feat: Optional[pd.DataFrame] = None
 
     def _load_base_feat() -> pd.DataFrame:
         nonlocal base_feat
         if base_feat is None:
-            resolved_data = Path(data_path) if data_path is not None else get_data_path()
+            normalized_data = _optional_path(data_path)
+            resolved_data = normalized_data if normalized_data is not None else get_data_path()
             base_feat = engineer_features(load_dataset(resolved_data))
         return base_feat
 
@@ -99,9 +102,18 @@ def _resolve_windows(
         ref_df = reference_df
 
     if recent_df is None:
-        resolved_recent = Path(recent_path) if recent_path is not None else get_drift_recent_path()
+        normalized_recent = _optional_path(recent_path)
+        resolved_recent = (
+            normalized_recent if normalized_recent is not None else get_drift_recent_path()
+        )
         if resolved_recent is not None:
             rec_df = load_dataset(resolved_recent)
+            if len(rec_df) <= 24:
+                logger.warning(
+                    "Recent drift dataset %s has only %d row(s); lag_24h feature engineering drops up to 24 rows, so rolling_mape may be skipped.",
+                    resolved_recent,
+                    len(rec_df),
+                )
         else:
             # Compare against the unmodified baseline dataset when no separate recent capture
             # is configured (preventing false seasonal drift on static CSV startup while
@@ -115,31 +127,31 @@ def _resolve_windows(
 
 def _resolve_champion_if_scoped(
     champion_model: Any,
-    models_dir: Optional[Path],
+    is_scoped: bool,
     resolved_models: Path,
     tracking_uri: Optional[str],
-) -> Any:
-    if champion_model is not None or (models_dir is None and tracking_uri is None):
-        return champion_model
+) -> Tuple[Any, bool]:
+    if champion_model is not None or not is_scoped:
+        return champion_model, champion_model is None
     try:
         model, _ = _resolve_current_champion(resolved_models, tracking_uri=tracking_uri)
-        return model
+        return model, False
     except Exception as exc:
         logger.warning(
             "No champion resolved from scoped models_dir/tracking_uri (%s: %s); skipping rolling MAPE.",
             type(exc).__name__,
             exc,
         )
-        return None
+        return None, False
 
 
 def run_drift_check_and_retrain(
     reference_df: Optional[pd.DataFrame] = None,
     recent_df: Optional[pd.DataFrame] = None,
     champion_model: Any = None,
-    data_path: Optional[Path] = None,
-    recent_path: Optional[Path] = None,
-    models_dir: Optional[Path] = None,
+    data_path: Optional[Path | str] = None,
+    recent_path: Optional[Path | str] = None,
+    models_dir: Optional[Path | str] = None,
     tracking_uri: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
@@ -148,12 +160,22 @@ def run_drift_check_and_retrain(
     Callable directly in tests or invoked periodically by the background scheduler.
     Always persists the latest drift check snapshot to ``drift_status.json``.
     """
-    resolved_models = Path(models_dir) if models_dir is not None else get_models_dir()
-    ref_df, rec_df = _resolve_windows(reference_df, recent_df, data_path, recent_path)
-    scoped_champion = _resolve_champion_if_scoped(
-        champion_model, models_dir, resolved_models, tracking_uri
+    normalized_models = _optional_path(models_dir)
+    normalized_data = _optional_path(data_path)
+    normalized_tracking = _optional_str(tracking_uri)
+    is_scoped = normalized_models is not None or normalized_tracking is not None
+    resolved_models = normalized_models if normalized_models is not None else get_models_dir()
+
+    ref_df, rec_df = _resolve_windows(reference_df, recent_df, normalized_data, recent_path)
+    scoped_champion, resolve_global = _resolve_champion_if_scoped(
+        champion_model, is_scoped, resolved_models, normalized_tracking
     )
-    drift_result = drift.check(ref_df, rec_df, champion_model=scoped_champion)
+    drift_result = drift.check(
+        ref_df,
+        rec_df,
+        champion_model=scoped_champion,
+        resolve_champion=resolve_global,
+    )
 
     retrain_triggered = False
     retrain_run_id: Optional[str] = None
@@ -164,16 +186,17 @@ def run_drift_check_and_retrain(
     triggered_signals = list(drift_result.get("triggered_signals") or [])
     try:
         if drift_result.get("drift_detected"):
-            trigger_used = _classify_trigger(triggered_signals)
+            candidate_trigger = _classify_trigger(triggered_signals)
             try:
                 record = run_retrain(
-                    trigger=trigger_used,
-                    data_path=data_path,
+                    trigger=candidate_trigger,
+                    data_path=normalized_data,
                     models_dir=resolved_models,
-                    tracking_uri=tracking_uri,
+                    tracking_uri=normalized_tracking,
                     signals=triggered_signals,
                 )
                 retrain_triggered = True
+                trigger_used = candidate_trigger
                 retrain_run_id = record.get("run_id")
                 retrain_outcome = record.get("outcome")
             except RetrainAlreadyRunningError as exc:
@@ -199,20 +222,32 @@ def run_drift_check_and_retrain(
     return snapshot
 
 
+def _wait_interruptible(stop_event: threading.Event, seconds: float) -> bool:
+    """Wait up to ``seconds`` (chunked under ``threading.TIMEOUT_MAX``); return True if stopped."""
+    remaining = seconds
+    max_chunk = max(1.0, float(threading.TIMEOUT_MAX) - 1.0)
+    while remaining > 0.0:
+        chunk = min(remaining, max_chunk)
+        if stop_event.wait(chunk):
+            return True
+        remaining -= chunk
+    return stop_event.is_set()
+
+
 def _scheduler_loop(
     stop_event: threading.Event,
     initial_delay: float,
     interval: float,
     check_fn: Callable[[], Any],
 ) -> None:
-    if initial_delay > 0.0 and stop_event.wait(initial_delay):
+    if initial_delay > 0.0 and _wait_interruptible(stop_event, initial_delay):
         return
     while not stop_event.is_set():
         try:
             check_fn()
         except Exception:
             logger.exception("Scheduled drift check failed.")
-        if stop_event.wait(interval):
+        if _wait_interruptible(stop_event, interval):
             return
 
 
@@ -237,21 +272,16 @@ def start_scheduler(
         logger.info("MLOps drift-check scheduler disabled via configuration.")
         return False
 
-    if initial_delay is None:
-        delay = get_scheduler_initial_delay_seconds()
-    else:
-        delay_val = float(initial_delay)
-        if not math.isfinite(delay_val):
-            raise ValueError(f"initial_delay must be finite; got {initial_delay!r}")
-        delay = max(0.0, delay_val)
-
-    if interval is None:
-        period = get_scheduler_interval_seconds()
-    else:
-        period_val = float(interval)
-        if not math.isfinite(period_val):
-            raise ValueError(f"interval must be finite; got {interval!r}")
-        period = max(0.05, period_val)
+    delay = (
+        get_scheduler_initial_delay_seconds()
+        if initial_delay is None
+        else validate_duration_seconds(initial_delay, "initial_delay", minimum=0.0, allow_zero=True)
+    )
+    period = (
+        get_scheduler_interval_seconds()
+        if interval is None
+        else validate_duration_seconds(interval, "interval", minimum=0.05, allow_zero=False)
+    )
 
     target_fn = check_fn or run_drift_check_and_retrain
 
@@ -265,9 +295,9 @@ def start_scheduler(
             name="ecotrack-drift-scheduler",
             daemon=True,
         )
+        thread.start()
         _stop_event = stop_event
         _scheduler_thread = thread
-        thread.start()
         logger.info(
             "Started MLOps drift-check scheduler (initial_delay=%.2fs, interval=%.2fs).",
             delay,
@@ -279,6 +309,7 @@ def start_scheduler(
 def stop_scheduler(timeout: float = 5.0) -> None:
     """Signal the background scheduler thread to stop and wait up to ``timeout`` seconds."""
     global _stop_event, _scheduler_thread
+    wait_timeout = validate_duration_seconds(timeout, "timeout", minimum=0.0, allow_zero=True)
     with _scheduler_lock:
         stop_event = _stop_event
         thread = _scheduler_thread
@@ -286,15 +317,19 @@ def stop_scheduler(timeout: float = 5.0) -> None:
     if stop_event is not None:
         stop_event.set()
     if thread is not None and thread.is_alive():
-        thread.join(timeout=timeout)
+        if thread is threading.current_thread():
+            return
+        max_chunk = max(1.0, float(threading.TIMEOUT_MAX) - 1.0)
+        thread.join(timeout=min(wait_timeout, max_chunk))
         if thread.is_alive():
             logger.warning(
                 "MLOps drift-check scheduler thread did not exit within %.2fs timeout.",
-                timeout,
+                wait_timeout,
             )
             return
 
     with _scheduler_lock:
         if _scheduler_thread is thread:
             _scheduler_thread = None
+            _stop_event = None
             _stop_event = None

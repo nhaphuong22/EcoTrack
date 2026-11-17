@@ -1,6 +1,8 @@
 const express = require('express');
 const { energyCache } = require('../utils/cache');
 const { callAIService } = require('../utils/aiClient');
+const { z } = require('zod');
+const { requireApiKey } = require('../middleware/apiKey');
 
 const router = express.Router();
 
@@ -27,7 +29,7 @@ router.get('/metrics', async (req, res, next) => {
 // GET /api/v1/energy/timeseries
 router.get('/timeseries', async (req, res, next) => {
   try {
-    const limit = parseInt(req.query.limit || '168', 10);
+    const limit = z.coerce.number().int().min(1).max(720).default(168).parse(req.query.limit);
     const cacheKey = `energy_timeseries_limit_${limit}`;
     const cached = energyCache.get(cacheKey);
 
@@ -51,7 +53,7 @@ router.get('/cache/stats', (req, res) => {
 });
 
 // POST /api/v1/energy/cache/clear
-router.post('/cache/clear', (req, res) => {
+router.post('/cache/clear', requireApiKey('OPERATOR_API_KEY', 'X-Operator-Key'), (req, res) => {
   energyCache.clear();
   res.json({ message: 'Energy TTL cache invalidated successfully.' });
 });

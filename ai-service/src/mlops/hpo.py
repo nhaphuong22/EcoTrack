@@ -96,10 +96,14 @@ def make_validation_slices(
     ]
 
     # Test-split guard: nothing in any fold may reach past the training split.
+    # Explicit raise (not assert) so this FR47 guarantee survives `python -O` /
+    # PYTHONOPTIMIZE, which strips assert statements.
     train_max_ts = pd.to_datetime(train_df["timestamp"]).max()
     for tr, va in slices:
-        assert pd.to_datetime(tr["timestamp"]).max() <= train_max_ts, "sub-train leaked past training split"
-        assert pd.to_datetime(va["timestamp"]).max() <= train_max_ts, "validation slice leaked past training split"
+        if pd.to_datetime(tr["timestamp"]).max() > train_max_ts:
+            raise RuntimeError("sub-train leaked past training split")
+        if pd.to_datetime(va["timestamp"]).max() > train_max_ts:
+            raise RuntimeError("validation slice leaked past training split")
     if not slices:
         raise ValueError("No usable validation slices could be built from the training split")
     return slices

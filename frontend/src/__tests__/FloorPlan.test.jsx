@@ -36,6 +36,7 @@ describe('FloorPlan - Story 2.2 Live Floor Plan & Copilot Integration', () => {
   const mockZones = [
     {
       id: 'z1',
+      building_id: 'office_tower_01',
       name: 'Phòng 101',
       floor: 1,
       latest_reading: {
@@ -47,6 +48,7 @@ describe('FloorPlan - Story 2.2 Live Floor Plan & Copilot Integration', () => {
     },
     {
       id: 'z2',
+      building_id: 'office_tower_01',
       name: 'Phòng 102',
       floor: 1,
       latest_reading: {
@@ -58,6 +60,7 @@ describe('FloorPlan - Story 2.2 Live Floor Plan & Copilot Integration', () => {
     },
     {
       id: 'z3',
+      building_id: 'office_tower_01',
       name: 'Phòng 103',
       floor: 1,
       latest_reading: {
@@ -146,6 +149,7 @@ describe('FloorPlan - Story 2.2 Live Floor Plan & Copilot Integration', () => {
     act(() => {
       es.emit('reading', {
         zone_id: 'z1',
+      building_id: 'office_tower_01',
         outdoor_temperature_c: 27.8,
         meter_reading_kwh: 92.4,
         relative_humidity_pct: 65,

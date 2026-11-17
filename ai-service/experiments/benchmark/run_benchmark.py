@@ -87,6 +87,9 @@ def execute_benchmark(
         Destination for predictions.parquet (defaults to a sibling of results.csv).
     horizon: int
         Maximum forecast horizon in hours (default 24).
+    models: Optional[List[BaseForecaster]]
+        Forecasters to score. Defaults to the registered set; Story 4.5 passes tuned
+        models (from ``build_tuned_models``) to produce the tuned-vs-untuned rows.
 
     Returns:
     --------

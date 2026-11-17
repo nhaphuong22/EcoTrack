@@ -1,17 +1,10 @@
-import { Bot, User, Wrench } from 'lucide-react';
+import { Wrench } from 'lucide-react';
 
 function ToolBadge({ tool }) {
-  const labels = {
-    query_metrics: '📊 query_metrics',
-    get_anomalies: '⚠️ get_anomalies',
-    query_forecast_summary: '📈 query_forecast_summary',
-    calculate_waste_cost: '💸 calculate_waste_cost',
-    domain_knowledge: '🧠 domain_knowledge',
-  };
   return (
-    <span className="inline-flex items-center gap-1 rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-mono text-sky-400">
-      <Wrench size={9} />
-      {labels[tool] || tool}
+    <span className="chip chip-info num font-medium">
+      <Wrench size={10} aria-hidden="true" />
+      {tool}
     </span>
   );
 }
@@ -23,9 +16,9 @@ function MarkdownText({ text }) {
     <span>
       {parts.map((part, i) => {
         if (part.startsWith('**') && part.endsWith('**'))
-          return <strong key={i} className="font-semibold text-white">{part.slice(2, -2)}</strong>;
+          return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
         if (part.startsWith('`') && part.endsWith('`'))
-          return <code key={i} className="rounded bg-slate-700/60 px-1 py-0.5 text-[11px] text-emerald-300 font-mono">{part.slice(1, -1)}</code>;
+          return <code key={i} className="rounded bg-sunken px-1 py-0.5 font-mono text-[12px] text-shell">{part.slice(1, -1)}</code>;
         if (part === '\n')
           return <br key={i} />;
         return <span key={i}>{part}</span>;
@@ -37,30 +30,23 @@ function MarkdownText({ text }) {
 export default function ChatMessage({ message }) {
   const isUser = message.role === 'user';
   return (
-    <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-      {/* Avatar */}
-      <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl ${isUser ? 'bg-emerald-500/20 text-emerald-400' : 'bg-sky-500/20 text-sky-400'}`}>
-        {isUser ? <User size={15} /> : <Bot size={15} />}
-      </div>
+    <div className={`flex flex-col gap-1.5 ${isUser ? 'items-end' : 'items-start'}`}>
+      <span className="text-[11px] font-semibold text-muted">{isUser ? 'Bạn' : 'Copilot'}</span>
 
-      {/* Bubble */}
-      <div className={`max-w-[82%] space-y-1.5 ${isUser ? 'items-end' : 'items-start'} flex flex-col`}>
-        {/* Tools used badges */}
-        {!isUser && message.tools_used?.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {message.tools_used.map(t => <ToolBadge key={t} tool={t} />)}
-          </div>
-        )}
-
-        <div
-          className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-            isUser
-              ? 'rounded-tr-sm bg-emerald-600/30 text-slate-100'
-              : 'rounded-tl-sm border border-slate-700/60 bg-slate-800/80 text-slate-200'
-          }`}
-        >
-          <MarkdownText text={message.content} />
+      {!isUser && message.tools_used?.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {message.tools_used.map(t => <ToolBadge key={t} tool={t} />)}
         </div>
+      )}
+
+      <div
+        className={`max-w-[88%] rounded-md px-3.5 py-2.5 text-sm leading-relaxed ${
+          isUser
+            ? 'bg-shell text-white'
+            : 'border border-line bg-panel text-ink'
+        }`}
+      >
+        <MarkdownText text={message.content} />
       </div>
     </div>
   );

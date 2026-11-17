@@ -1,18 +1,18 @@
-import { AlertTriangle, MessageSquare, Clock } from 'lucide-react';
+import { CheckCircle2, MessageSquare } from 'lucide-react';
 
 const SEVERITY_CONFIG = {
-  Critical: { badge: 'bg-rose-500/20 text-rose-300 border-rose-500/30', dot: 'bg-rose-500' },
-  Medium:   { badge: 'bg-amber-500/20 text-amber-300 border-amber-500/30', dot: 'bg-amber-500' },
-  Low:      { badge: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30', dot: 'bg-yellow-400' },
-  Normal:   { badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30', dot: 'bg-emerald-500' },
+  Critical: { chip: 'chip-crit', row: 'bg-crit' },
+  Medium:   { chip: 'chip-warn', row: 'bg-warn-fill' },
+  Low:      { chip: 'chip-mute', row: 'bg-line-strong' },
+  Normal:   { chip: 'chip-ok',   row: 'bg-ok' },
 };
 
 export default function AnomalyTable({ anomalies, loading, onAskCopilot }) {
   if (loading) {
     return (
-      <div className="space-y-2">
+      <div className="panel space-y-px overflow-hidden bg-line" aria-busy="true">
         {[...Array(3)].map((_, i) => (
-          <div key={i} className="h-16 animate-pulse rounded-xl bg-slate-800/60" />
+          <div key={i} className="h-14 animate-pulse bg-panel" />
         ))}
       </div>
     );
@@ -20,81 +20,83 @@ export default function AnomalyTable({ anomalies, loading, onAskCopilot }) {
 
   if (!anomalies?.length) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 py-10">
-        <div className="rounded-full bg-emerald-500/10 p-4">
-          <AlertTriangle size={28} className="text-emerald-400" />
+      <div className="panel flex items-center gap-4 px-5 py-6">
+        <CheckCircle2 size={28} className="shrink-0 text-ok" aria-hidden="true" />
+        <div>
+          <p className="text-sm font-semibold text-ink">Không phát hiện bất thường</p>
+          <p className="meta mt-0.5">Isolation Forest không ghi nhận sự cố trong thời gian theo dõi.</p>
         </div>
-        <p className="text-sm font-medium text-emerald-400">Không phát hiện bất thường</p>
-        <p className="text-xs text-slate-500">Isolation Forest không ghi nhận sự cố trong thời gian theo dõi.</p>
       </div>
     );
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-700 bg-slate-800/60 backdrop-blur-sm">
-      <div className="flex items-center justify-between border-b border-slate-700 px-5 py-3.5">
-        <h3 className="font-semibold text-white">
+    <section className="panel overflow-hidden" aria-label="Danh sách sự cố bất thường">
+      <div className="panel-head">
+        <h3 className="panel-title flex items-center gap-2.5">
           Danh sách sự cố bất thường
-          <span className="ml-2 rounded-full bg-rose-500/20 px-2 py-0.5 text-xs font-bold text-rose-400">
-            {anomalies.length}
-          </span>
+          <span className="chip chip-crit num">{anomalies.length}</span>
         </h3>
-        <p className="text-xs text-slate-400">Mới nhất · Isolation Forest</p>
+        <p className="meta">Mới nhất · Isolation Forest</p>
       </div>
 
-      <div className="divide-y divide-slate-700/50 max-h-72 overflow-y-auto">
-        {anomalies.map((anom) => {
-          const cfg = SEVERITY_CONFIG[anom.severity] || SEVERITY_CONFIG.Low;
-          const ts  = anom.timestamp?.slice(0, 16)?.replace('T', ' ') || '—';
-          return (
-            <div
-              key={anom.id}
-              className="group flex items-center gap-4 px-5 py-3.5 transition hover:bg-slate-700/30"
-            >
-              {/* Severity dot */}
-              <span className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${cfg.dot} animate-pulse`} />
-
-              {/* Info */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${cfg.badge}`}>
-                    {anom.severity}
-                  </span>
-                  <span className="text-xs font-medium text-slate-200 truncate">{anom.subsystem}</span>
-                </div>
-                <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-400">
-                  <Clock size={10} />
-                  {ts} · Δ <strong className="text-rose-300">+{anom.delta_kwh} kWh</strong>
-                  · Score: {anom.anomaly_score?.toFixed(2)}
-                  · 🌡️ {anom.outdoor_temp_c}°C
-                </p>
-                {anom.description && (
-                  <p className="mt-0.5 text-[11px] text-slate-500 truncate">{anom.description}</p>
-                )}
-              </div>
-
-              {/* Cost estimate */}
-              <div className="hidden text-right sm:block flex-shrink-0">
-                <p className="text-xs font-semibold text-rose-400">
-                  {anom.estimated_waste_vnd?.toLocaleString('vi-VN')} đ
-                </p>
-                <p className="text-[10px] text-slate-500">${anom.estimated_waste_usd}</p>
-              </div>
-
-              {/* Ask Copilot */}
-              <button
-                id={`ask-copilot-${anom.id}`}
-                onClick={() => onAskCopilot?.(anom)}
-                className="flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2.5 py-1.5 text-[11px] font-medium text-sky-400 opacity-0 transition hover:bg-sky-500/20 group-hover:opacity-100"
-                title="Hỏi Copilot về sự cố này"
-              >
-                <MessageSquare size={12} />
-                Copilot
-              </button>
-            </div>
-          );
-        })}
+      <div className="max-h-[340px] overflow-auto">
+        <table className="w-full min-w-[620px] border-collapse text-left text-sm">
+          <thead className="sticky top-0 z-10 bg-sunken text-xs text-muted">
+            <tr>
+              <th scope="col" className="px-4 py-2 font-medium">Mức độ · Hệ thống</th>
+              <th scope="col" className="px-3 py-2 font-medium">Thời điểm</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Δ kWh</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Điểm</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Nhiệt độ</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Lãng phí</th>
+              <th scope="col" className="px-4 py-2"><span className="sr-only">Hành động</span></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line">
+            {anomalies.map((anom) => {
+              const severity = String(anom.severity || 'Low');
+              const cfg = SEVERITY_CONFIG[severity.charAt(0).toUpperCase() + severity.slice(1).toLowerCase()] || SEVERITY_CONFIG.Low;
+              const ts  = anom.timestamp?.slice(0, 16)?.replace('T', ' ') || '—';
+              return (
+                <tr key={anom.id} className="align-top hover:bg-sunken/70">
+                  <td className="relative px-4 py-3">
+                    <span className={`absolute inset-y-2 left-0 w-0.5 ${cfg.row}`} aria-hidden="true" />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`chip uppercase ${cfg.chip}`}>{anom.severity}</span>
+                      <span className="font-medium text-ink">{anom.subsystem}</span>
+                    </div>
+                    {anom.description && (
+                      <p className="mt-1 max-w-sm truncate text-xs text-muted">{anom.description}</p>
+                    )}
+                  </td>
+                  <td className="num whitespace-nowrap px-3 py-3 text-xs text-ink-2">{ts}</td>
+                  <td className="num whitespace-nowrap px-3 py-3 text-right font-semibold text-crit">
+                    {anom.delta_kwh == null ? '—' : `+${anom.delta_kwh} kWh`}
+                  </td>
+                  <td className="num px-3 py-3 text-right text-ink-2">{anom.anomaly_score?.toFixed(2)}</td>
+                  <td className="num whitespace-nowrap px-3 py-3 text-right text-ink-2">{anom.outdoor_temp_c ?? '—'}°C</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-right">
+                    <p className="num font-semibold text-ink">{anom.estimated_waste_vnd?.toLocaleString('vi-VN') ?? '—'} đ</p>
+                    <p className="num text-xs text-muted">${anom.estimated_waste_usd ?? '—'}</p>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      id={`ask-copilot-${anom.id}`}
+                      onClick={() => onAskCopilot?.(anom)}
+                      className="btn btn-quiet btn-sm"
+                      title="Hỏi Copilot về sự cố này"
+                    >
+                      <MessageSquare size={13} aria-hidden="true" />
+                      Copilot
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
-    </div>
+    </section>
   );
 }

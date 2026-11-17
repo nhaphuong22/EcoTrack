@@ -179,3 +179,26 @@ def test_promote_champion_translates_mlflow_error_and_clear_alias(temp_store):
 
     clear_champion_alias()
     assert resolve_champion_version() is None
+
+
+def test_register_and_bootstrap_champion_fails_loud_on_non_not_found_mlflow_error(
+    temp_store, monkeypatch
+):
+    from mlflow.exceptions import MlflowException
+    from mlflow.tracking import MlflowClient
+    from src.mlops.tracking import register_and_bootstrap_champion
+
+    model, params, metrics, row_counts = _tiny_trained()
+    first = track_training_run(model, params, metrics, XGB_FEATURE_COLUMNS, row_counts)
+    assert first is not None and first["champion_version"] == "1"
+
+    def _raise_internal_error(self, name, alias):
+        raise MlflowException("tracking backend failure", error_code="INTERNAL_ERROR")
+
+    with monkeypatch.context() as mp:
+        mp.setattr(MlflowClient, "get_model_version_by_alias", _raise_internal_error)
+        with pytest.raises(ChampionArtifactError):
+            register_and_bootstrap_champion("1")
+
+    assert resolve_champion_version() == "1"
+

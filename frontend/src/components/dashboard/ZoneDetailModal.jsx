@@ -1,6 +1,19 @@
 import { useEffect } from 'react';
 import { X, Bot, Zap, Thermometer, Droplets, Clock, ArrowRight } from 'lucide-react';
 
+function Reading({ icon: Icon, label, value, note, noteTone = 'text-muted' }) {
+  return (
+    <div className="bg-panel p-3.5">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-muted">
+        <Icon size={14} aria-hidden="true" />
+        <span>{label}</span>
+      </div>
+      <div className="num mt-2 text-lg font-semibold text-ink">{value}</div>
+      <div className={`mt-1 text-xs font-semibold ${noteTone}`}>{note}</div>
+    </div>
+  );
+}
+
 export default function ZoneDetailModal({ zone, isOpen, onClose, onAskCopilot }) {
   useEffect(() => {
     function handleKeyDown(e) {
@@ -41,99 +54,74 @@ export default function ZoneDetailModal({ zone, isOpen, onClose, onAskCopilot })
       role="dialog"
       aria-modal="true"
       aria-labelledby="zone-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/55 p-4"
     >
       <div
-        className="w-full max-w-lg rounded-2xl border border-slate-700/80 bg-gradient-to-b from-slate-900 to-slate-950 p-6 shadow-2xl shadow-black/60 relative space-y-6"
+        className="relative w-full max-w-lg overflow-hidden rounded-md border border-line-strong bg-panel shadow-[0_24px_60px_-20px_rgba(14,30,29,0.55)]"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-start justify-between border-b border-slate-800 pb-4">
+        <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />
-              <h2 id="zone-modal-title" className="text-xl font-bold text-white">
-                {zone.name || `Khu vực ${zone.id}`}
-              </h2>
-            </div>
-            <p className="text-xs text-slate-400 mt-1">
-              Mã khu vực: <span className="font-mono text-emerald-400">{zone.id}</span> • Tầng {zone.floor || 1} • EcoTrack Office
+            <h2 id="zone-modal-title" className="text-lg font-bold text-ink">
+              {zone.name || `Khu vực ${zone.id}`}
+            </h2>
+            <p className="meta mt-1">
+              Mã khu vực: <span className="num font-medium text-ink-2">{zone.id}</span> • Tầng {zone.floor || 1} • EcoTrack Office
             </p>
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition"
+            className="btn btn-quiet btn-sm px-2"
             aria-label="Đóng bảng chi tiết"
           >
-            <X size={20} />
+            <X size={16} aria-hidden="true" />
           </button>
         </div>
 
-        {/* 3 Metric Cards */}
-        <div className="grid grid-cols-3 gap-3">
-          {/* Điện năng */}
-          <div className="rounded-xl border border-slate-800/80 bg-slate-800/40 p-3.5 space-y-1">
-            <div className="flex items-center gap-1.5 text-xs text-amber-400 font-medium">
-              <Zap size={14} />
-              <span>Tiêu thụ</span>
-            </div>
-            <div className="text-lg font-bold text-white">{kwh}</div>
-            <div className={`text-[11px] font-medium ${isHighWaste ? 'text-rose-400' : 'text-emerald-400'}`}>
-              {isHighWaste ? 'Tải tiêu thụ cao' : 'Mức bình thường'}
-            </div>
+        <div className="space-y-4 p-5">
+          <div className="grid grid-cols-3 gap-px overflow-hidden rounded border border-line bg-line">
+            <Reading
+              icon={Zap}
+              label="Tiêu thụ"
+              value={kwh}
+              note={isHighWaste ? 'Tải tiêu thụ cao' : 'Mức bình thường'}
+              noteTone={isHighWaste ? 'text-crit' : 'text-ok'}
+            />
+            <Reading
+              icon={Thermometer}
+              label="Nhiệt độ"
+              value={temp}
+              note={isWarm ? 'Hơi ấm' : 'Mát mẻ (Chuẩn)'}
+              noteTone={isWarm ? 'text-warn' : 'text-ok'}
+            />
+            <Reading icon={Droplets} label="Độ ẩm" value={humidity} note="Độ ẩm tương đối" />
           </div>
 
-          {/* Nhiệt độ */}
-          <div className="rounded-xl border border-slate-800/80 bg-slate-800/40 p-3.5 space-y-1">
-            <div className="flex items-center gap-1.5 text-xs text-rose-400 font-medium">
-              <Thermometer size={14} />
-              <span>Nhiệt độ</span>
+          <div className="rounded border border-line bg-sunken p-4 text-sm">
+            <div className="flex items-center justify-between text-xs text-muted">
+              <span className="flex items-center gap-1.5">
+                <Clock size={12} aria-hidden="true" /> Cập nhật lần cuối:
+              </span>
+              <span className="num font-medium text-ink">{time}</span>
             </div>
-            <div className="text-lg font-bold text-white">{temp}</div>
-            <div className={`text-[11px] font-medium ${isWarm ? 'text-amber-400' : 'text-emerald-400'}`}>
-              {isWarm ? 'Hơi ấm' : 'Mát mẻ (Chuẩn)'}
-            </div>
+            <p className="mt-3 leading-relaxed text-ink-2">
+              {isHighWaste
+                ? 'Phòng này đang có dấu hiệu tiêu thụ điện năng vượt mức thông thường. Cần kiểm tra hệ thống chiếu sáng và máy lạnh.'
+                : 'Các chỉ số vi khí hậu và năng lượng tại phòng này đang duy trì ở dải vận hành tối ưu.'}
+            </p>
           </div>
 
-          {/* Độ ẩm */}
-          <div className="rounded-xl border border-slate-800/80 bg-slate-800/40 p-3.5 space-y-1">
-            <div className="flex items-center gap-1.5 text-xs text-sky-400 font-medium">
-              <Droplets size={14} />
-              <span>Độ ẩm</span>
-            </div>
-            <div className="text-lg font-bold text-white">{humidity}</div>
-            <div className="text-[11px] font-medium text-slate-400">Độ ẩm tương đối</div>
-          </div>
-        </div>
-
-        {/* Time and diagnosis summary */}
-        <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-2 text-xs">
-          <div className="flex items-center justify-between text-slate-400">
-            <span className="flex items-center gap-1">
-              <Clock size={12} /> Cập nhật lần cuối:
-            </span>
-            <span className="font-mono text-slate-200">{time}</span>
-          </div>
-          <p className="text-slate-300 leading-relaxed">
-            {isHighWaste
-              ? 'Phòng này đang có dấu hiệu tiêu thụ điện năng vượt mức thông thường. Cần kiểm tra hệ thống chiếu sáng và máy lạnh.'
-              : 'Các chỉ số vi khí hậu và năng lượng tại phòng này đang duy trì ở dải vận hành tối ưu.'}
-          </p>
-        </div>
-
-        {/* Action Button: Hỏi Copilot */}
-        <div className="pt-2">
           <button
             id="zone-ask-copilot-btn"
             onClick={() => {
               onClose();
               onAskCopilot(zone);
             }}
-            className="w-full flex items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 hover:scale-[1.02] hover:shadow-emerald-500/30 active:scale-[0.98] transition"
+            className="btn btn-primary w-full gap-2.5 py-3"
           >
-            <Bot size={18} />
+            <Bot size={17} aria-hidden="true" />
             <span>Hỏi Copilot phân tích phòng này</span>
-            <ArrowRight size={16} />
+            <ArrowRight size={16} aria-hidden="true" />
           </button>
         </div>
       </div>

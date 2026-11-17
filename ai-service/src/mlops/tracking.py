@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -407,6 +408,30 @@ def _epoch_ms_to_iso_utc(ts_ms: Any) -> Optional[str]:
         return None
 
 
+def _artifact_exists_at(root_entries: List[Any], dl_uri: str, rel: str, uri: str) -> bool:
+    import mlflow
+
+    parts = Path(rel.strip()).parts
+    if not parts or any(part in ("", ".", "..") for part in parts):
+        return False
+    entries = root_entries
+    for idx, part in enumerate(parts):
+        entry = next((item for item in entries if Path(item.path).name == part), None)
+        if entry is None:
+            return False
+        if idx < len(parts) - 1:
+            if not entry.is_dir:
+                return False
+            sub_uri = f"{dl_uri.rstrip('/')}/{'/'.join(parts[: idx + 1])}"
+            entries = mlflow.artifacts.list_artifacts(artifact_uri=sub_uri, tracking_uri=uri)
+        elif entry.is_dir:
+            sub_uri = f"{dl_uri.rstrip('/')}/{'/'.join(parts)}"
+            return bool(mlflow.artifacts.list_artifacts(artifact_uri=sub_uri, tracking_uri=uri))
+        else:
+            return entry.file_size is None or entry.file_size > 0
+    return False
+
+
 def _verify_champion_artifacts(client: Any, version: str, uri: str) -> Optional[str]:
     """Verify ``MLmodel`` and declared flavor artifacts exist without deserializing the binary."""
     import mlflow
@@ -414,28 +439,35 @@ def _verify_champion_artifacts(client: Any, version: str, uri: str) -> Optional[
 
     dl_uri = client.get_model_version_download_uri(REGISTERED_MODEL_NAME, version)
     artifacts = mlflow.artifacts.list_artifacts(artifact_uri=dl_uri, tracking_uri=uri)
-    by_name = {Path(a.path).name: a for a in artifacts}
-    mlmodel_entry = by_name.get("MLmodel")
-    if mlmodel_entry is None or mlmodel_entry.is_dir or (mlmodel_entry.file_size or 0) <= 0:
+    mlmodel_entry = next((item for item in artifacts if Path(item.path).name == "MLmodel"), None)
+    if (
+        mlmodel_entry is None
+        or mlmodel_entry.is_dir
+        or (mlmodel_entry.file_size is not None and mlmodel_entry.file_size <= 0)
+    ):
         return f"Champion model version {version} is missing MLmodel metadata."
 
-    mlmodel_path = mlflow.artifacts.download_artifacts(
-        artifact_uri=f"{dl_uri.rstrip('/')}/MLmodel",
-        tracking_uri=uri,
-        registry_uri=uri,
-    )
-    doc = yaml.safe_load(Path(mlmodel_path).read_text(encoding="utf-8")) or {}
-    flavors = doc.get("flavors") if isinstance(doc, dict) else None
-    if isinstance(flavors, dict):
-        for cfg in flavors.values():
-            if not isinstance(cfg, dict):
-                continue
-            rel = cfg.get("data") or cfg.get("model_path")
-            if isinstance(rel, str) and rel.strip():
-                top_name = Path(rel.strip()).parts[0]
-                entry = by_name.get(top_name)
-                if entry is None or (not entry.is_dir and (entry.file_size or 0) <= 0):
-                    return f"Champion model version {version} is missing model artifact '{rel}'."
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        mlmodel_path = mlflow.artifacts.download_artifacts(
+            artifact_uri=f"{dl_uri.rstrip('/')}/MLmodel",
+            dst_path=tmp_dir,
+            tracking_uri=uri,
+            registry_uri=uri,
+        )
+        doc = yaml.safe_load(Path(mlmodel_path).read_text(encoding="utf-8"))
+
+    if not isinstance(doc, dict):
+        return f"Champion model version {version} has invalid MLmodel metadata."
+    flavors = doc.get("flavors")
+    if not isinstance(flavors, dict) or not flavors:
+        return f"Champion model version {version} is missing MLmodel flavors metadata."
+
+    for cfg in flavors.values():
+        if not isinstance(cfg, dict):
+            continue
+        rel = cfg.get("data") or cfg.get("model_path")
+        if rel is not None and (not isinstance(rel, str) or not _artifact_exists_at(artifacts, dl_uri, rel, uri)):
+            return f"Champion model version {version} is missing model artifact '{rel}'."
     return None
 
 
@@ -449,15 +481,17 @@ def get_champion_metadata(tracking_uri: Optional[str] = None) -> Dict[str, Any]:
     """
     clean_uri = tracking_uri.strip() if isinstance(tracking_uri, str) else None
     effective_uri = clean_uri or None
-    if mlflow_disabled() or not mlflow_available() or not is_mlflow_initialised(effective_uri):
+    if mlflow_disabled() or not mlflow_available():
         return {"status": "unavailable", "version": None, "trained_at": None, "metrics": None, "error": None}
 
     from mlflow.exceptions import MlflowException
     from mlflow.tracking import MlflowClient
 
-    uri = effective_uri or get_tracking_uri()
     try:
-        client = MlflowClient(tracking_uri=uri)
+        if not is_mlflow_initialised(effective_uri):
+            return {"status": "unavailable", "version": None, "trained_at": None, "metrics": None, "error": None}
+        uri = effective_uri or get_tracking_uri()
+        client = MlflowClient(tracking_uri=uri, registry_uri=uri)
         mv = client.get_model_version_by_alias(REGISTERED_MODEL_NAME, CHAMPION_ALIAS)
     except MlflowException as exc:
         if _is_not_found(exc):
@@ -495,11 +529,14 @@ def get_champion_metadata(tracking_uri: Optional[str] = None) -> Dict[str, Any]:
         ) or getattr(mv, "creation_timestamp", None)
         trained_at = _epoch_ms_to_iso_utc(ts_ms)
         raw_metrics = run.data.metrics if run is not None else {}
-        metrics = {
-            str(k): float(v)
-            for k, v in raw_metrics.items()
-            if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v))
-        }
+        metrics: Dict[str, float] = {}
+        for k, v in raw_metrics.items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                fval = float(v)
+                if math.isfinite(fval):
+                    metrics[str(k)] = fval
+                else:
+                    logger.warning("Ignoring non-finite MLflow metric %r=%r for champion version %s.", k, v, version)
     except Exception as exc:
         return {
             "status": "broken",

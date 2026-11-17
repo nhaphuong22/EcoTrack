@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 
 // 10 zones matching office_tower_01 seed
 const ZONES = Array.from({ length: 10 }, (_, i) => `z${i + 1}`);
@@ -62,7 +63,7 @@ function parseArgs(args = process.argv.slice(2)) {
     intervalMs: 3000,
     buildingId: 'office_tower_01',
     gatewayUrl: process.env.GATEWAY_URL || 'http://localhost:5000',
-    apiKey: process.env.INGEST_API_KEY || 'ecotrack_ingest_secret_2026',
+    apiKey: process.env.INGEST_API_KEY,
     once: false,
     maxTicks: Infinity,
   };
@@ -142,6 +143,7 @@ async function sendBatch(batch, options) {
 
 async function runSimulator(options = {}) {
   const opts = { ...parseArgs([]), ...options };
+  if (!opts.apiKey) throw new Error('INGEST_API_KEY or --api-key is required.');
   const rows = loadDataRows();
   let rowIndex = 0;
   let tickCount = 0;

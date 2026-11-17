@@ -9,6 +9,11 @@
     "dev": "nodemon src/server.js",
     "test": "vitest run",
     "simulate": "node src/simulator/runSimulator.js",
+    "demo:keys": "node scripts/configure-demo-keys.cjs",
+    "setup:manager": "node scripts/setup-manager.cjs",
+    "setup:admin": "node scripts/setup-admin.cjs",
+    "test:database": "node scripts/verify-business-flows.cjs",
+    "test:households": "node scripts/verify-household-access.cjs",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:migrate": "prisma migrate dev",
@@ -19,6 +24,8 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "google-auth-library": "^11.3.2",
+    "nodemailer": "^6.9.16",
     "zod": "^3.24.2"
   },
   "devDependencies": {

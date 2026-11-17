@@ -1,7 +1,7 @@
 const prisma = require('../db');
 const readingStreamService = require('./readingStreamService');
 
-// ponytail: single-batch createMany with skipDuplicates; partition or stream if ingestion volume exceeds 10k/s
+// RETURNING distinguishes committed inserts from rows skipped as duplicates.
 async function ingestReadings(readings) {
   if (!Array.isArray(readings) || readings.length === 0) {
     return { stored: 0 };
@@ -44,7 +44,17 @@ async function ingestReadings(readings) {
   }
 
   // 3. Persist batch with duplicate skipping
+  const meters = await prisma.meter.findMany({ where: { building_id: { in: buildingIds } } });
+  const meterMap = new Map(meters.map((meter) => [`${meter.building_id}:${meter.zone_id || ''}`, meter.id]));
+  for (const reading of readings) {
+    if (!meterMap.has(`${reading.building_id}:${reading.zone_id || ''}`)) {
+      const error = new Error('Meter is not provisioned for this building/zone.');
+      error.status = 422;
+      throw error;
+    }
+  }
   const records = readings.map((r) => ({
+    meter_id: meterMap.get(`${r.building_id}:${r.zone_id || ''}`),
     building_id: r.building_id,
     zone_id: r.zone_id || null,
     timestamp: r.timestamp instanceof Date ? r.timestamp : new Date(r.timestamp),
@@ -53,14 +63,15 @@ async function ingestReadings(readings) {
     relative_humidity_pct: r.relative_humidity_pct ?? null,
   }));
 
-  const result = await prisma.meterReading.createMany({
+  const inserted = await prisma.meterReading.createManyAndReturn({
     data: records,
     skipDuplicates: true,
   });
 
-  if (result.count > 0) {
-    for (const r of records) {
+  if (inserted.length > 0) {
+    for (const r of inserted) {
       readingStreamService.broadcastReading({
+        meter_id: r.meter_id,
         building_id: r.building_id,
         zone_id: r.zone_id,
         timestamp: r.timestamp.toISOString(),
@@ -71,7 +82,7 @@ async function ingestReadings(readings) {
     }
   }
 
-  return { stored: result.count };
+  return { stored: inserted.length };
 }
 
 module.exports = {

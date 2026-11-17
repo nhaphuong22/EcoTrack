@@ -26,6 +26,7 @@ load_dotenv(AI_SERVICE_DIR / ".env")
 from src.api.routers import energy, forecast, anomalies, copilot, mlops
 from src.mlops.scheduler import start_scheduler, stop_scheduler
 
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     start_scheduler()
@@ -115,15 +116,30 @@ def health(details: bool = False):
     xgb_exists = (models_dir / "xgboost_forecaster.joblib").is_file()
     iso_exists = (models_dir / "isolation_forest.joblib").is_file()
 
-    # Report whether an MLflow champion is resolvable (Story 4.5), feeding Story 2.3 / 4.10
-    # status. Best-effort: never raises, falls back to None when MLflow is not initialised.
+    # Report the real champion status (Story 4.5), feeding Story 2.3 / 4.10. This loads the
+    # champion artifact (no caching) so health agrees with what serving actually does, rather
+    # than reporting a champion the service would 503 on. Best-effort: never raises.
+    champion_status = "unavailable"
     champion_version = None
     try:
-        from src.mlops.tracking import resolve_champion_version
+        from src.mlops.tracking import champion_health
 
-        champion_version = resolve_champion_version()
+        _health = champion_health()
+        champion_status = _health["status"]
+        champion_version = _health["version"]
     except Exception:
+        champion_status = "unavailable"
         champion_version = None
+
+    # Forecast availability mirrors serving: a resolved champion serves; a broken champion
+    # makes serving 503 (no fallback), so it is NOT "loaded"; otherwise serving falls back to
+    # the on-disk forecaster.
+    if champion_status == "resolved":
+        forecast_status = "loaded"
+    elif champion_status == "broken":
+        forecast_status = "unavailable"
+    else:
+        forecast_status = "loaded" if xgb_exists else "unavailable"
 
     copilot_engine = "rule_based_fallback"
     if os.getenv("GEMINI_API_KEY", "").strip():
@@ -134,10 +150,10 @@ def health(details: bool = False):
     return {
         "status": "healthy",
         "models": {
-            "forecast": "loaded" if (xgb_exists or champion_version) else "unavailable",
+            "forecast": forecast_status,
             "anomaly": "loaded" if iso_exists else "unavailable",
             "champion_version": champion_version,
-            "champion": "resolved" if champion_version else "unavailable",
+            "champion": champion_status,
         },
         "copilot_engine": copilot_engine,
     }

@@ -46,7 +46,7 @@ const mockPrisma = {
 global.__mockPrisma = mockPrisma;
 
 import request from 'supertest';
-import app from '../src/app';
+import app from './helpers/adminApp';
 
 describe('GET /api/v1/buildings/:id/zones', () => {
   beforeEach(() => {

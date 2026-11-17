@@ -1,15 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
-import app from '../src/app';
-import prisma from '../src/db';
+import app from './helpers/adminApp';
+const mockPrisma = { conversation: { createMany: vi.fn() } };
+global.__mockPrisma = mockPrisma;
 
 describe('Express Proxy Routes with Mocked Fetch', () => {
   const originalFetch = global.fetch;
 
   beforeEach(() => {
     // Clear cache before each test
-    request(app).post('/api/v1/energy/cache/clear');
-    vi.spyOn(prisma.conversation, 'createMany').mockResolvedValue({ count: 2 });
+    request(app).post('/api/v1/energy/cache/clear').set('X-Operator-Key', process.env.OPERATOR_API_KEY);
+    mockPrisma.conversation.createMany.mockResolvedValue({ count: 2 });
   });
 
   afterEach(() => {
@@ -58,7 +59,7 @@ describe('Express Proxy Routes with Mocked Fetch', () => {
     });
 
     // Clear cache first
-    await request(app).post('/api/v1/energy/cache/clear');
+    await request(app).post('/api/v1/energy/cache/clear').set('X-Operator-Key', process.env.OPERATOR_API_KEY);
 
     // First request -> MISS
     const res1 = await request(app).get('/api/v1/energy/metrics');

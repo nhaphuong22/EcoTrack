@@ -5,8 +5,10 @@ export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:50
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
+  withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 });
+export const accountApi = apiClient;
 
 /** GET /api/v1/energy/metrics */
 export const fetchMetrics = () =>
@@ -25,11 +27,12 @@ export const fetchForecast = () =>
   apiClient.get('/api/v1/forecast/predict').then(r => r.data);
 
 /** POST /api/v1/copilot/chat */
-export const sendCopilotMessage = (message, buildingId = 'office_tower_01', history = []) =>
+export const sendCopilotMessage = (message, buildingId = 'office_tower_01', history = [], sessionId) =>
   apiClient.post('/api/v1/copilot/chat', {
     message,
     building_id: buildingId,
     history,
+    session_id: sessionId,
   }).then(r => r.data);
 
 /** GET /api/v1/buildings/:id/zones */

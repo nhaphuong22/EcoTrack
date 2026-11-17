@@ -1,6 +1,6 @@
 import asyncio
 from typing import Any, Dict, List
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from src.agent.orchestrator import copilot_orchestrator
@@ -18,6 +18,10 @@ class InternalChatRequest(BaseModel):
 @router.post("/chat")
 async def chat_with_copilot(req: InternalChatRequest):
     """Processes conversational reasoning with ReAct energy tools."""
+    # Only this building has an analytics replay. Never answer another building
+    # using office_tower_01 measurements without telling the caller.
+    if req.building_id != "office_tower_01":
+        raise HTTPException(status_code=422, detail="Demo analytics are available only for office_tower_01.")
     reply, tools_used = await asyncio.to_thread(
         copilot_orchestrator.process_chat,
         req.message,

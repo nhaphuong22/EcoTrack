@@ -17,6 +17,8 @@ Covers:
 
 from __future__ import annotations
 
+import json
+import logging
 import threading
 import time
 from pathlib import Path
@@ -173,8 +175,7 @@ def test_run_drift_check_distribution_drift_triggers_drift_with_signals(isolated
     # 2. Air-temperature-only drift -> classified as "drift" with signals=["air_temperature"]
     temp_shifted = train_df.copy()
     temp_shifted["air_temperature"] = np.random.RandomState(3).normal(80.0, 2.0, size=len(temp_shifted))
-    perfect_stub = type("_Perfect", (), {"predict": lambda self, X: temp_shifted.tail(len(X))["meter_reading"].to_numpy()})()
-    # Keep recent_df's tail aligned with perfect_stub via constant-length wrapper
+
     class _ExactTail:
         def predict(self, X):
             return temp_shifted.tail(len(X))["meter_reading"].to_numpy()
@@ -257,7 +258,7 @@ def test_run_drift_check_scoped_mlflow_and_retrain_failure_still_persist_status(
     models_dir.mkdir(parents=True, exist_ok=True)
     uri = f"sqlite:///{db.as_posix()}"
 
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{(tmp_path / 'other_mlflow.db').as_posix()}")
     monkeypatch.setenv("MLFLOW_ARTIFACT_ROOT", str(artifacts.as_posix()))
     monkeypatch.delenv("ECOTRACK_DISABLE_MLFLOW", raising=False)
     monkeypatch.setenv("ECOTRACK_MODELS_DIR", str(tmp_path / "other_dir"))
@@ -276,8 +277,8 @@ def test_run_drift_check_scoped_mlflow_and_retrain_failure_still_persist_status(
     )
 
     # Scoped models_dir/tracking_uri resolves the weak MLflow champion (rolling_mape > 15%),
-    # even though ECOTRACK_MODELS_DIR points elsewhere. Missing data_path triggers failed retrain,
-    # and drift_status.json is still saved cleanly.
+    # even though MLFLOW_TRACKING_URI and ECOTRACK_MODELS_DIR point elsewhere. Simulated
+    # _train_challenger error triggers failed retrain while drift_status.json is saved cleanly.
     monkeypatch.setattr(
         retrain_mod,
         "_train_challenger",
@@ -291,9 +292,39 @@ def test_run_drift_check_scoped_mlflow_and_retrain_failure_still_persist_status(
         tracking_uri=uri,
     )
     assert status["rolling_mape"] is not None
+    assert status["rolling_mape"]["mape_percent"] > 15.0
     assert status["retrain_triggered"] is True
+    assert status["retrain_trigger"] == "mape"
     assert status["retrain_outcome"] == "failed"
     assert load_drift_status(models_dir) == status
+    assert not (tmp_path / "other_dir").exists()
+    history = load_retrain_history(models_dir)
+    assert len(history) == 1
+    assert history[0]["outcome"] == "failed"
+
+
+def test_run_drift_check_scoped_empty_dir_does_not_leak_global_champion(isolated_models_env):
+    global_models_dir = isolated_models_env["models_dir"]
+    scoped_empty_dir = isolated_models_env["tmp"] / "scoped_empty"
+    scoped_empty_dir.mkdir(parents=True, exist_ok=True)
+
+    df = engineer_features(load_dataset(FIXTURE_CSV))
+    train_df, _ = split_time_series_data(df, train_ratio=0.8)
+    bad_global_champ = _fit_tiny_xgb(train_df, max_depth=2, scale_target=0.5)
+    joblib.dump(bad_global_champ, global_models_dir / "xgboost_forecaster.joblib")
+
+    status = run_drift_check_and_retrain(
+        reference_df=train_df,
+        recent_df=train_df.copy(),
+        models_dir=scoped_empty_dir,
+    )
+
+    assert status["rolling_mape"] is None
+    assert status["drift_detected"] is False
+    assert status["retrain_triggered"] is False
+    assert status["retrain_trigger"] is None
+    assert load_drift_status(scoped_empty_dir) == status
+    assert load_drift_status(global_models_dir) is None
 
 
 def test_run_drift_check_handles_retrain_lock_conflict_safely(isolated_models_env):
@@ -314,6 +345,7 @@ def test_run_drift_check_handles_retrain_lock_conflict_safely(isolated_models_en
 
     assert status["drift_detected"] is True
     assert status["retrain_triggered"] is False
+    assert status["retrain_trigger"] is None
     assert status["retrain_run_id"] is None
     assert status["retrain_skipped_reason"] == "retrain_already_running"
     assert load_drift_status(models_dir) == status
@@ -334,10 +366,36 @@ def test_scheduler_config_env_parsing_and_validation(monkeypatch):
     assert mlops_config.get_scheduler_interval_seconds() == 86400.0
     assert mlops_config.get_scheduler_initial_delay_seconds() == 10.0
 
-    for bad in ("nan", "inf", "-inf", "abc"):
+    monkeypatch.setenv("ECOTRACK_SCHEDULER_INTERVAL_SECONDS", "0.01")
+    assert mlops_config.get_scheduler_interval_seconds() == 0.05
+    monkeypatch.setenv("ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS", "0")
+    assert mlops_config.get_scheduler_initial_delay_seconds() == 0.0
+
+    for bad in ("nan", "inf", "-inf", "abc", "0", "-5"):
         monkeypatch.setenv("ECOTRACK_SCHEDULER_INTERVAL_SECONDS", bad)
         with pytest.raises(ValueError):
             mlops_config.get_scheduler_interval_seconds()
+
+    monkeypatch.setenv("ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS", "-1")
+    with pytest.raises(ValueError):
+        mlops_config.get_scheduler_initial_delay_seconds()
+
+    monkeypatch.setenv("ECOTRACK_DRIFT_RECENT_PATH", "   ")
+    assert mlops_config.get_drift_recent_path() is None
+    monkeypatch.setenv("ECOTRACK_DRIFT_RECENT_PATH", f"  {FIXTURE_CSV}  ")
+    assert mlops_config.get_drift_recent_path() == FIXTURE_CSV
+
+    monkeypatch.setenv("ECOTRACK_SCHEDULER_ENABLED", "1")
+    for bad_kw in (
+        {"interval": 0},
+        {"interval": -1.0},
+        {"interval": True},
+        {"interval": float("nan")},
+        {"initial_delay": -0.1},
+        {"initial_delay": False},
+    ):
+        with pytest.raises(ValueError):
+            start_scheduler(check_fn=lambda: None, **bad_kw)
 
 
 def test_scheduler_lifecycle_disabled_in_test_cancel_restart_and_timeout(
@@ -406,4 +464,123 @@ def test_scheduler_lifecycle_disabled_in_test_cancel_restart_and_timeout(
             break
         time.sleep(0.02)
     stop_scheduler(timeout=2.0)
+    assert not is_scheduler_running()
+
+
+def test_run_drift_check_zero_args_and_unmocked_lifespan(isolated_models_env, monkeypatch):
+    models_dir = isolated_models_env["models_dir"]
+    df = engineer_features(load_dataset(FIXTURE_CSV))
+    train_df, _ = split_time_series_data(df, train_ratio=0.8)
+    joblib.dump(_fit_tiny_xgb(train_df), models_dir / "xgboost_forecaster.joblib")
+
+    assert load_drift_status() is None
+    status = run_drift_check_and_retrain()
+    assert status["drift_detected"] is False
+    assert status["rolling_mape"] is not None
+    assert load_drift_status() == status
+
+    (models_dir / "drift_status.json").unlink()
+    monkeypatch.setenv("ECOTRACK_SCHEDULER_ENABLED", "1")
+    monkeypatch.setenv("ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS", "0.01")
+    monkeypatch.setenv("ECOTRACK_SCHEDULER_INTERVAL_SECONDS", "60.0")
+
+    with TestClient(app):
+        assert is_scheduler_running()
+        for _ in range(100):
+            if load_drift_status() is not None:
+                break
+            time.sleep(0.05)
+
+    assert not is_scheduler_running()
+    persisted = load_drift_status()
+    assert persisted is not None
+    assert persisted["drift_detected"] is False
+    assert persisted["retrain_triggered"] is False
+
+
+def test_scheduler_edge_cases_paths_timeouts_and_corrupt_status(
+    isolated_models_env, monkeypatch, caplog
+):
+    models_dir = isolated_models_env["models_dir"]
+    tmp_path = isolated_models_env["tmp"]
+    df = engineer_features(load_dataset(FIXTURE_CSV))
+    train_df, _ = split_time_series_data(df, train_ratio=0.8)
+    champion = _fit_tiny_xgb(train_df)
+
+    # Blank string path arguments fall back cleanly instead of resolving to Path(".")
+    cwd_guard = tmp_path / "cwd_guard"
+    cwd_guard.mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(cwd_guard)
+    status_blank = run_drift_check_and_retrain(
+        reference_df=train_df,
+        recent_df=train_df.copy(),
+        champion_model=champion,
+        data_path="",
+        recent_path="  ",
+        models_dir="",
+    )
+    assert load_drift_status(models_dir) == status_blank
+    assert not (cwd_guard / "drift_status.json").exists()
+
+    # Short recent_path (<= 24 rows) warns cleanly before lag_24h drops all rows
+    short_csv = tmp_path / "short_recent.csv"
+    pd.read_csv(FIXTURE_CSV).head(10).to_csv(short_csv, index=False)
+    with caplog.at_level(logging.WARNING, logger="MLOpsScheduler"):
+        status_short = run_drift_check_and_retrain(
+            reference_df=train_df,
+            recent_path=short_csv,
+            champion_model=champion,
+            models_dir=models_dir,
+        )
+    assert status_short["rolling_mape"] is None
+    assert "lag_24h" in caplog.text
+
+    # Corrupt / non-dict drift_status.json fails loudly
+    status_path = models_dir / "drift_status.json"
+    status_path.write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError, match="Expected a JSON object"):
+        load_drift_status(models_dir)
+    status_path.write_text("{corrupt", encoding="utf-8")
+    with pytest.raises(json.JSONDecodeError):
+        load_drift_status(models_dir)
+
+    # Values exceeding threading.TIMEOUT_MAX, self-stop, invalid stop_scheduler timeout, start failure
+    monkeypatch.setenv("ECOTRACK_SCHEDULER_ENABLED", "1")
+    assert start_scheduler(
+        check_fn=lambda: None,
+        initial_delay=float(threading.TIMEOUT_MAX) + 500.0,
+        interval=1.0,
+    )
+    assert is_scheduler_running()
+    stop_scheduler(timeout=float(threading.TIMEOUT_MAX) + 10.0)
+    assert not is_scheduler_running()
+
+    self_stopped = threading.Event()
+
+    def _self_stop_check():
+        stop_scheduler(timeout=1.0)
+        self_stopped.set()
+
+    assert start_scheduler(check_fn=_self_stop_check, initial_delay=0.0, interval=5.0)
+    assert self_stopped.wait(timeout=2.0)
+    for _ in range(40):
+        if not is_scheduler_running():
+            break
+        time.sleep(0.02)
+    stop_scheduler(timeout=1.0)
+    assert not is_scheduler_running()
+
+    for bad_timeout in (float("nan"), -1.0, True):
+        with pytest.raises(ValueError):
+            stop_scheduler(timeout=bad_timeout)
+
+    monkeypatch.setattr(
+        threading.Thread,
+        "start",
+        lambda self: (_ for _ in ()).throw(RuntimeError("Thread creation failed")),
+    )
+    with pytest.raises(RuntimeError, match="Thread creation failed"):
+        start_scheduler(check_fn=lambda: None, initial_delay=1.0, interval=1.0)
+    assert scheduler_mod._stop_event is None
+    assert scheduler_mod._scheduler_thread is None
     assert not is_scheduler_running()

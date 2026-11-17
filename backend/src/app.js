@@ -10,12 +10,25 @@ const anomaliesRouter = require('./routes/anomalies');
 const copilotRouter = require('./routes/copilot');
 const ingestRouter = require('./routes/ingest');
 const streamRouter = require('./routes/stream');
+const mlopsRouter = require('./routes/mlops');
 const healthRouter = require('./routes/health');
+const authRouter = require('./routes/auth');
+const portalRouter = require('./routes/portal');
+const { requireUser, requirePlatformAdmin } = require('./middleware/requireUser');
 
+function createApp({ authenticate = requireUser } = {}) {
 const app = express();
 
-app.use(cors());
+const origins = (process.env.FRONTEND_ORIGIN || 'http://localhost:3000,http://127.0.0.1:3000').split(',').map((value) => value.trim());
+app.use(cors({ origin: origins, credentials: true }));
 app.use(express.json());
+app.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.get('Origin') && !origins.includes(req.get('Origin'))) {
+    return res.status(403).json({ detail: 'Origin is not allowed.' });
+  }
+  next();
+});
 
 // Root & Health endpoints
 app.get('/', (req, res) => {
@@ -29,6 +42,12 @@ app.get('/', (req, res) => {
 
 app.use('/health', healthRouter);
 app.use('/api/v1/health', healthRouter);
+app.use('/api/v1/auth', authRouter);
+app.use('/api/v1/portal', authenticate, portalRouter);
+// Sensor ingestion has a dedicated machine credential. No resident session can
+// access unscoped legacy APIs; operators use the scoped portal as well.
+app.use('/api/v1/ingest', ingestRouter);
+app.use('/api/v1', authenticate, requirePlatformAdmin);
 
 // Mount domain routes under /api/v1
 app.use('/api/v1/buildings', buildingsRouter);
@@ -36,10 +55,13 @@ app.use('/api/v1/energy', energyRouter);
 app.use('/api/v1/forecast', forecastRouter);
 app.use('/api/v1/anomalies', anomaliesRouter);
 app.use('/api/v1/copilot', copilotRouter);
-app.use('/api/v1/ingest', ingestRouter);
 app.use('/api/v1/stream', streamRouter);
+app.use('/api/v1/mlops', mlopsRouter);
 
 // Global Error Handler
 app.use(errorHandler);
 
-module.exports = app;
+return app;
+}
+module.exports = createApp();
+module.exports.createApp = createApp;
