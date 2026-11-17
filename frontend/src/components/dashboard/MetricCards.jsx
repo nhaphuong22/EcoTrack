@@ -35,11 +35,18 @@ export default function MetricCards({ metrics }) {
   }
 
   const {
-    total_consumption_kwh,
-    peak_demand_kw,
-    total_anomalies_detected,
-    estimated_waste_cost_vnd,
+    total_consumption_kwh = 0,
+    peak_demand_kw = 0,
+    total_anomalies_detected = 0,
+    estimated_waste_cost_vnd = 0,
+    estimated_waste_cost_usd,
   } = metrics;
+
+  const usdValue = estimated_waste_cost_usd ?? (estimated_waste_cost_vnd / 25000);
+  const formattedUsd = usdValue > 0 && usdValue < 10 ? usdValue.toFixed(2) : usdValue.toFixed(0);
+  const wasteK = (estimated_waste_cost_vnd > 0 && estimated_waste_cost_vnd < 1000)
+    ? (estimated_waste_cost_vnd / 1000).toFixed(2)
+    : (estimated_waste_cost_vnd / 1000).toFixed(0);
 
   const readings = [
     {
@@ -66,9 +73,9 @@ export default function MetricCards({ metrics }) {
     {
       icon: Banknote,
       label: 'Ước tính lãng phí',
-      value: (estimated_waste_cost_vnd / 1000).toFixed(0),
+      value: wasteK,
       unit: 'K VNĐ',
-      subLabel: `≈ $${(estimated_waste_cost_vnd / 25000).toFixed(0)} USD`,
+      subLabel: `≈ $${formattedUsd} USD`,
       tone: estimated_waste_cost_vnd > 0 ? 'crit' : 'neutral',
     },
   ];

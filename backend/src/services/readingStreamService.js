@@ -14,7 +14,12 @@ function broadcastReading(reading) {
   readingEmitter.emit('reading', reading);
 }
 
+function broadcastAnomaly(anomaly) {
+  readingEmitter.emit('anomaly', anomaly);
+}
+
 module.exports = {
   readingEmitter,
   broadcastReading,
+  broadcastAnomaly,
 };

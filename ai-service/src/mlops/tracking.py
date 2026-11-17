@@ -62,6 +62,13 @@ class ChampionArtifactError(Exception):
 # --------------------------------------------------------------------------- #
 # Configuration / run lifecycle
 # --------------------------------------------------------------------------- #
+def _normalize_artifact_location(location: str) -> str:
+    """Convert Windows drive paths (e.g. ``C:/...``) into ``file:///`` URIs for MLflow."""
+    if len(location) >= 2 and location[0].isalpha() and location[1] == ":":
+        return Path(location).resolve().as_uri()
+    return location
+
+
 def configure(tracking_uri: Optional[str] = None, artifact_location: Optional[str] = None) -> str:
     """
     Point MLflow at the (repo-relative by default) store and ensure the EcoTrack
@@ -79,9 +86,12 @@ def configure(tracking_uri: Optional[str] = None, artifact_location: Optional[st
     exp_name = get_experiment_name()
     experiment = mlflow.get_experiment_by_name(exp_name)
     if experiment is None:
+        resolved_artifact_loc = _normalize_artifact_location(
+            artifact_location or get_artifact_location()
+        )
         mlflow.create_experiment(
             exp_name,
-            artifact_location=artifact_location or get_artifact_location(),
+            artifact_location=resolved_artifact_loc,
         )
     mlflow.set_experiment(exp_name)
     return uri
@@ -452,7 +462,6 @@ def _verify_champion_artifacts(client: Any, version: str, uri: str) -> Optional[
             artifact_uri=f"{dl_uri.rstrip('/')}/MLmodel",
             dst_path=tmp_dir,
             tracking_uri=uri,
-            registry_uri=uri,
         )
         doc = yaml.safe_load(Path(mlmodel_path).read_text(encoding="utf-8"))
 

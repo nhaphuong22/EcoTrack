@@ -2,8 +2,10 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   ZONES,
   loadDataRows,
+  sampleTimeAlignedRow,
   generateBatch,
   sendBatch,
+  seedBackfill,
   runSimulator,
   parseArgs,
 } from '../src/simulator/runSimulator';
@@ -65,6 +67,67 @@ describe('Sensor Simulator Bot (runSimulator)', () => {
     const normalZ1 = normalBatch.find((r) => r.zone_id === 'z1');
     const anomalyZ1 = anomalyBatch.find((r) => r.zone_id === 'z1');
     expect(anomalyZ1.meter_reading_kwh).toBe(normalZ1.meter_reading_kwh);
+  });
+
+  it('scales hourly dataset kWh proportionally to tick intervalMs', () => {
+    const row = { meter_reading: 200.0, air_temperature: 30.0 };
+    const batch3s = generateBatch(row, { buildingId: 'office_tower_01', intervalMs: 3000 });
+    const batch1m = generateBatch(row, { buildingId: 'office_tower_01', intervalMs: 60000 });
+
+    const z1ThreeSec = batch3s.find((r) => r.zone_id === 'z1');
+    const z1OneMin = batch1m.find((r) => r.zone_id === 'z1');
+    // 200 kWh/h * 0.08 * (3000 / 3600000) = 0.0133 kWh; at 60s it is 20x higher (~0.2667 kWh)
+    expect(z1ThreeSec.meter_reading_kwh).toBeCloseTo(0.0133, 4);
+    expect(z1OneMin.meter_reading_kwh).toBeCloseTo(0.2667, 4);
+    expect(z1ThreeSec.interval_seconds).toBe(3);
+  });
+
+  it('produces realistic time-of-day curves, weekend scaling, and hourly backfill', async () => {
+    const opts = parseArgs([
+      '--profile', 'office',
+      '--tz', 'Asia/Ho_Chi_Minh',
+      '--backfill-hours', '3',
+      '--no-jitter',
+    ]);
+    expect(opts.profile).toBe('office');
+    expect(opts.timeZone).toBe('Asia/Ho_Chi_Minh');
+    expect(opts.backfillHours).toBe(3);
+    expect(opts.jitter).toBe(false);
+
+    // 2026-11-18 is a Wednesday: 03:00+07:00 = 2026-11-17T20:00:00Z, 14:30+07:00 = 2026-11-18T07:30:00Z
+    const night = sampleTimeAlignedRow(new Date('2026-11-17T20:00:00Z'), opts);
+    const afternoonPeak = sampleTimeAlignedRow(new Date('2026-11-18T07:30:00Z'), opts);
+    // 2026-11-22 is Sunday: 14:30+07:00 = 2026-11-22T07:30:00Z
+    const weekendAfternoon = sampleTimeAlignedRow(new Date('2026-11-22T07:30:00Z'), opts);
+
+    expect(afternoonPeak.meter_reading).toBeGreaterThan(night.meter_reading * 3);
+    expect(afternoonPeak.air_temperature).toBeGreaterThan(night.air_temperature + 5);
+    expect(weekendAfternoon.meter_reading).toBeCloseTo(afternoonPeak.meter_reading * 0.45, 1);
+
+    const originalFetch = global.fetch;
+    const postedBatches = [];
+    global.fetch = vi.fn(async (_url, init) => {
+      postedBatches.push(JSON.parse(init.body));
+      return { ok: true, status: 201, json: async () => ({ stored: 30 }) };
+    });
+    try {
+      const stored = await seedBackfill(opts, null, new Date('2026-11-18T08:15:00Z'));
+      expect(stored).toBe(30);
+      expect(postedBatches).toHaveLength(1);
+      expect(postedBatches[0]).toHaveLength(33); // 3 hours * (10 zones + 1 BUILDING_TOTAL)
+      expect(postedBatches[0][0].interval_seconds).toBe(3600);
+      expect(postedBatches[0][0].timestamp).toBe('2026-11-18T05:00:00.000Z');
+      const hour1Items = postedBatches[0].slice(0, 10);
+      const hour1Total = postedBatches[0][10];
+      expect(hour1Total.zone_id).toBeNull();
+      expect(hour1Total.meter_reading_kwh).toBeCloseTo(
+        hour1Items.reduce((s, r) => s + r.meter_reading_kwh, 0),
+        3
+      );
+      expect(postedBatches[0][22].timestamp).toBe('2026-11-18T07:00:00.000Z');
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 
   it('catches network errors gracefully without crashing', async () => {

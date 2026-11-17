@@ -87,6 +87,12 @@ def test_mlflow_not_initialised_falls_back_with_warning(tmp_path, monkeypatch, c
     models_dir = Path(__import__("os").environ["ECOTRACK_MODELS_DIR"])
     xgb_path = models_dir / "xgboost_forecaster.joblib"
 
+    # MLflow SQLite initialization runs Alembic's fileConfig(), which strips root handlers
+    # including pytest's caplog.handler attached during test setup.
+    root_logger = logging.getLogger()
+    if caplog.handler not in root_logger.handlers:
+        root_logger.addHandler(caplog.handler)
+
     with caplog.at_level(logging.WARNING, logger="ServingFrame"):
         model = _load_champion_forecaster_or_fallback(xgb_path)
     assert hasattr(model, "predict")  # loaded from models_saved/
@@ -117,6 +123,12 @@ def test_initialised_store_without_champion_alias_falls_back(tmp_path, monkeypat
 
     models_dir = Path(__import__("os").environ["ECOTRACK_MODELS_DIR"])
     xgb_path = models_dir / "xgboost_forecaster.joblib"
+
+    # MLflow SQLite initialization runs Alembic's fileConfig(), which strips root handlers
+    # including pytest's caplog.handler attached during test setup.
+    root_logger = logging.getLogger()
+    if caplog.handler not in root_logger.handlers:
+        root_logger.addHandler(caplog.handler)
 
     with caplog.at_level(logging.WARNING, logger="ServingFrame"):
         model = _load_champion_forecaster_or_fallback(xgb_path)

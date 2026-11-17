@@ -1,5 +1,6 @@
 const prisma = require('../db');
 const readingStreamService = require('./readingStreamService');
+const anomalyService = require('./anomalyService');
 
 // RETURNING distinguishes committed inserts from rows skipped as duplicates.
 async function ingestReadings(readings) {
@@ -53,22 +54,30 @@ async function ingestReadings(readings) {
       throw error;
     }
   }
-  const records = readings.map((r) => ({
-    meter_id: meterMap.get(`${r.building_id}:${r.zone_id || ''}`),
-    building_id: r.building_id,
-    zone_id: r.zone_id || null,
-    timestamp: r.timestamp instanceof Date ? r.timestamp : new Date(r.timestamp),
-    meter_reading_kwh: r.meter_reading_kwh,
-    outdoor_temperature_c: r.outdoor_temperature_c ?? null,
-    relative_humidity_pct: r.relative_humidity_pct ?? null,
-  }));
+  const intervalByKey = new Map();
+  const records = readings.map((r) => {
+    const ts = r.timestamp instanceof Date ? r.timestamp : new Date(r.timestamp);
+    if (typeof r.interval_seconds === 'number' && Number.isFinite(r.interval_seconds)) {
+      intervalByKey.set(`${r.building_id}:${r.zone_id || ''}:${ts.toISOString()}`, r.interval_seconds);
+    }
+    return {
+      meter_id: meterMap.get(`${r.building_id}:${r.zone_id || ''}`),
+      building_id: r.building_id,
+      zone_id: r.zone_id || null,
+      timestamp: ts,
+      meter_reading_kwh: r.meter_reading_kwh,
+      outdoor_temperature_c: r.outdoor_temperature_c ?? null,
+      relative_humidity_pct: r.relative_humidity_pct ?? null,
+    };
+  });
 
   const inserted = await prisma.meterReading.createManyAndReturn({
     data: records,
     skipDuplicates: true,
   });
 
-  if (inserted.length > 0) {
+  // Skip per-reading SSE broadcast & live anomaly scoring for large historical backfill batches.
+  if (inserted.length > 0 && inserted.length <= 20) {
     for (const r of inserted) {
       readingStreamService.broadcastReading({
         meter_id: r.meter_id,
@@ -80,6 +89,7 @@ async function ingestReadings(readings) {
         relative_humidity_pct: r.relative_humidity_pct,
       });
     }
+    await anomalyService.evaluateLiveReadings(inserted, intervalByKey);
   }
 
   return { stored: inserted.length };

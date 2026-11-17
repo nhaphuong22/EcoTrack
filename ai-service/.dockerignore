@@ -1,0 +1,15 @@
+.git
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.deepeval/
+mlruns/
+chroma_db/
+experiments/logs/
+data/
+.env
+.env.*
+!.env.example

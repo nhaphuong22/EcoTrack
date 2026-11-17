@@ -1,5 +1,9 @@
+const { randomUUID } = require('crypto');
 const prisma = require('../db');
+const { energyCache } = require('../utils/cache');
 const { callAIService } = require('../utils/aiClient');
+const { getHourlyBuildingSeries } = require('../utils/liveSeries');
+const readingStreamService = require('./readingStreamService');
 
 const VALID_STATUSES = ['OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'IGNORED'];
 
@@ -37,6 +41,7 @@ async function updateAnomalyStatus(anomalyId, status, note = null) {
     data: { status, status_history: nextHistory },
   });
   if (result.count !== 1) throw conflict();
+  energyCache.clear();
   return {
     id: anomalyId, previous_status: record.status, current_status: status,
     updated_at: updatedAt, note,
@@ -113,4 +118,139 @@ async function listAnomalies() {
   return [...merged.values()].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
 }
 
-module.exports = { updateAnomalyStatus, syncAnomaliesFromAI, listAnomalies };
+const LIVE_COOLDOWN_MS = 10 * 60 * 1000;
+const LIVE_MAX_AGE_MS = 15 * 60 * 1000;
+
+async function evaluateLiveReadings(insertedReadings, intervalByKey = new Map()) {
+  if (!Array.isArray(insertedReadings) || insertedReadings.length === 0 || insertedReadings.length > 20) {
+    return [];
+  }
+  if (typeof prisma.anomalyEvent?.findFirst !== 'function' || typeof prisma.meterReading?.findMany !== 'function') {
+    return [];
+  }
+
+  const nowMs = Date.now();
+  const candidates = insertedReadings.filter((r) => {
+    const tsMs = (r.timestamp instanceof Date ? r.timestamp : new Date(r.timestamp)).getTime();
+    return Number.isFinite(tsMs) && Math.abs(nowMs - tsMs) <= LIVE_MAX_AGE_MS;
+  });
+  if (candidates.length === 0) return [];
+
+  try {
+    const bldgSeriesCache = new Map();
+    const items = [];
+
+    for (const r of candidates) {
+      const ts = r.timestamp instanceof Date ? r.timestamp : new Date(r.timestamp);
+      const tsIso = ts.toISOString();
+      const key = `${r.building_id}:${r.zone_id || ''}:${tsIso}`;
+
+      let bldgSeries = bldgSeriesCache.get(r.building_id);
+      if (!bldgSeries) {
+        bldgSeries = (await getHourlyBuildingSeries(r.building_id, 48)).map((p) => p.meter_reading_kwh);
+        bldgSeriesCache.set(r.building_id, bldgSeries);
+      }
+
+      const prior = r.meter_id ? await prisma.meterReading.findMany({
+        where: { meter_id: r.meter_id, timestamp: { lt: ts } },
+        orderBy: { timestamp: 'desc' },
+        take: 20,
+      }) : [];
+
+      let intervalSec = intervalByKey.get(key);
+      if (!intervalSec && prior.length > 0) {
+        const dt = (ts.getTime() - prior[0].timestamp.getTime()) / 1000;
+        if (dt > 0 && dt <= 3600) intervalSec = dt;
+      }
+      if (!intervalSec) intervalSec = 3600;
+
+      const meterHourlyKwhs = [];
+      for (let i = 0; i < prior.length - 1; i += 1) {
+        const dt = (prior[i].timestamp.getTime() - prior[i + 1].timestamp.getTime()) / 1000;
+        if (dt >= 1 && dt <= 7200) {
+          meterHourlyKwhs.push(prior[i].meter_reading_kwh * (3600 / Math.min(dt, 3600)));
+        }
+      }
+
+      items.push({
+        building_id: r.building_id,
+        zone_id: r.zone_id || null,
+        meter_id: r.meter_id || null,
+        timestamp: tsIso,
+        meter_reading_kwh: r.meter_reading_kwh,
+        interval_seconds: intervalSec,
+        outdoor_temperature_c: r.outdoor_temperature_c ?? null,
+        recent_meter_hourly_kwhs: meterHourlyKwhs,
+        recent_building_hourly_kwhs: bldgSeries,
+      });
+    }
+
+    const flagged = await callAIService('/internal/anomalies/score', {
+      method: 'POST',
+      body: { items },
+    });
+    if (!Array.isArray(flagged) || flagged.length === 0) return [];
+
+    const persisted = [];
+    for (const ev of flagged) {
+      const evTs = new Date(ev.timestamp);
+      const cooldownSince = new Date(evTs.getTime() - LIVE_COOLDOWN_MS);
+      const existing = ev.meter_id ? await prisma.anomalyEvent.findFirst({
+        where: {
+          building_id: ev.building_id,
+          meter_id: ev.meter_id,
+          status: 'OPEN',
+          timestamp: { gte: cooldownSince },
+        },
+        orderBy: { timestamp: 'desc' },
+      }) : null;
+
+      if (existing) {
+        if (ev.actual_kwh > existing.actual_reading && typeof prisma.anomalyEvent.update === 'function') {
+          const updated = await prisma.anomalyEvent.update({
+            where: { id: existing.id },
+            data: {
+              timestamp: evTs,
+              actual_reading: ev.actual_kwh,
+              anomaly_score: Math.max(existing.anomaly_score, ev.anomaly_score),
+              severity: ev.severity,
+              suggested_action: ev.suggested_action,
+              snapshot: { ...ev, id: existing.id },
+            },
+          });
+          const dto = toEvent(updated);
+          readingStreamService.broadcastAnomaly(dto);
+          persisted.push(dto);
+        }
+        continue;
+      }
+
+      const id = `ANOM-LIVE-${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+      const created = await prisma.anomalyEvent.create({
+        data: {
+          id,
+          building_id: ev.building_id,
+          meter_id: ev.meter_id || null,
+          timestamp: evTs,
+          actual_reading: ev.actual_kwh,
+          anomaly_score: ev.anomaly_score,
+          severity: ev.severity,
+          suggested_action: ev.suggested_action || ev.description || null,
+          status: 'OPEN',
+          snapshot: { ...ev, id },
+          status_history: [],
+        },
+      });
+      const dto = toEvent(created);
+      readingStreamService.broadcastAnomaly(dto);
+      persisted.push(dto);
+    }
+    if (persisted.length > 0) energyCache.clear();
+    return persisted;
+  } catch (err) {
+    console.warn('Live anomaly scoring skipped:', err.message);
+    return [];
+  }
+}
+
+module.exports = { updateAnomalyStatus, syncAnomaliesFromAI, listAnomalies, evaluateLiveReadings };

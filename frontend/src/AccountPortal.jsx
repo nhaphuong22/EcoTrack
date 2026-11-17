@@ -13,6 +13,7 @@ function message(error) {
 }
 const labelOf = (context) => context.scope === 'household' ? context.label
   : `${context.label} — ${context.scope === 'common' ? 'Khu vực chung' : 'Tổng tòa nhà'}`;
+const formatKwh = (value) => (value > 0 && value < 1 ? value.toFixed(4) : value.toFixed(2));
 
 export default function AccountPortal() {
   const [user, setUser] = useState(null);
@@ -239,7 +240,7 @@ export default function AccountPortal() {
 
         {context && <section aria-label="Tóm tắt" className="panel grid gap-px overflow-hidden bg-line sm:grid-cols-3">
           <div className="bg-panel px-5 py-4"><h2 className="text-[13px] font-medium text-muted">Điện năng trong khoảng dữ liệu</h2>
-            <p className="num mt-2 text-[28px] font-semibold leading-none text-ink">{data ? `${data.metrics.total_consumption_kwh.toFixed(2)} kWh` : '—'}</p></div>
+            <p className="num mt-2 text-[28px] font-semibold leading-none text-ink">{data ? `${formatKwh(data.metrics.total_consumption_kwh)} kWh` : '—'}</p></div>
           <div className="bg-panel px-5 py-4"><h2 className="text-[13px] font-medium text-muted">Số thời điểm có dữ liệu</h2>
             <p className="num mt-2 text-[28px] font-semibold leading-none text-ink">{data?.count ?? '—'}</p></div>
           <div className="bg-panel px-5 py-4"><h2 className="text-[13px] font-medium text-muted">Cảnh báo trong phạm vi</h2>
@@ -253,9 +254,17 @@ export default function AccountPortal() {
             {!!zones.length && <section className="panel"><div className="panel-head"><h2 className="panel-title">Khu vực được phép xem</h2></div>
               <div className="grid gap-px overflow-hidden rounded-b-md bg-line sm:grid-cols-2 xl:grid-cols-3">{zones.map((zone) => <article key={zone.id} className="bg-panel p-4">
                 <h3 className="text-sm font-semibold text-ink">{zone.name}</h3>
-                <p className="num mt-2 text-xl font-semibold text-shell">{zone.latest_reading?.meter_reading_kwh ?? '—'} kWh</p>
+                <p className="num mt-2 text-xl font-semibold text-shell">{zone.latest_reading?.meter_reading_kwh != null ? formatKwh(zone.latest_reading.meter_reading_kwh) : '—'} kWh</p>
                 <p className="meta mt-1">{zone.latest_reading?.timestamp ? new Date(zone.latest_reading.timestamp).toLocaleString('vi-VN') : 'Chưa có số đo'}</p>
               </article>)}</div></section>}
+
+            {!!data?.anomalies?.length && <section className="panel overflow-hidden">
+              <div className="panel-head"><h2 className="panel-title">Cảnh báo tiêu thụ bất thường</h2></div>
+              <div className="divide-y divide-line">{data.anomalies.slice(0, 10).map((anom) => <div key={anom.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
+                <div><span className="chip chip-crit mr-2 uppercase">{anom.severity}</span><span className="font-medium text-ink">{anom.subsystem || anom.suggested_action || 'Cảnh báo tải cao'}</span></div>
+                <div className="num text-xs text-muted">{new Date(anom.timestamp).toLocaleString('vi-VN')} · +{Number(anom.delta_kwh || 0).toFixed(2)} kWh</div>
+              </div>)}</div>
+            </section>}
 
             {!!data?.data.length && <section className="panel overflow-hidden">
               <div className="panel-head"><h2 className="panel-title">Lịch sử gần nhất</h2></div>
@@ -263,7 +272,7 @@ export default function AccountPortal() {
                 <table className="w-full border-collapse text-left text-sm">
                   <thead className="sticky top-0 bg-sunken text-xs text-muted"><tr><th scope="col" className="px-4 py-2 font-medium">Thời điểm</th><th scope="col" className="px-4 py-2 text-right font-medium">Điện năng</th></tr></thead>
                   <tbody className="divide-y divide-line">{data.data.slice(-24).reverse().map((point) => <tr key={point.timestamp} className="hover:bg-sunken/70">
-                    <td className="num px-4 py-2 text-ink-2">{new Date(point.timestamp).toLocaleString('vi-VN')}</td><td className="num px-4 py-2 text-right font-medium text-ink">{point.meter_reading_kwh.toFixed(2)} kWh</td></tr>)}</tbody>
+                    <td className="num px-4 py-2 text-ink-2">{new Date(point.timestamp).toLocaleString('vi-VN')}</td><td className="num px-4 py-2 text-right font-medium text-ink">{formatKwh(point.meter_reading_kwh)} kWh</td></tr>)}</tbody>
                 </table>
               </div></section>}
           </div>

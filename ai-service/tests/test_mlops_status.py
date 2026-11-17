@@ -37,13 +37,15 @@ def _seed_mlflow_champion(
     mlflow = pytest.importorskip("mlflow")
     from mlflow.tracking import MlflowClient
 
+    tmp_path.mkdir(parents=True, exist_ok=True)
     db = tmp_path / "mlflow.db"
     artifacts = tmp_path / "artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
     uri = f"sqlite:///{db.as_posix()}"
     prev_uri = mlflow.get_tracking_uri()
     mlflow.set_tracking_uri(uri)
     try:
-        exp_id = mlflow.create_experiment("ecotrack-test", artifact_location=artifacts.as_posix())
+        exp_id = mlflow.create_experiment("ecotrack-test", artifact_location=artifacts.resolve().as_uri())
         with mlflow.start_run(experiment_id=exp_id) as run:
             mlflow.log_metrics(metrics)
             if mlmodel_content is not None:
@@ -397,6 +399,12 @@ def test_status_nan_mlflow_metric_warned_and_filtered(tmp_path, monkeypatch, cap
         {"rmse_kwh": 22.5, "nan_metric": float("nan")},
     )
     monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
+
+    # MLflow SQLite initialization triggers Alembic's logging.config.fileConfig(),
+    # which replaces root logger handlers and detaches pytest's caplog handler.
+    root_logger = logging.getLogger()
+    if caplog.handler not in root_logger.handlers:
+        root_logger.addHandler(caplog.handler)
 
     with caplog.at_level(logging.WARNING):
         meta = get_champion_metadata()

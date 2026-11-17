@@ -210,7 +210,7 @@ export default function FloorPlan({ buildingId = 'office_tower_01', onAskCopilot
                   ? `${tempVal.toFixed(1)}°C`
                   : '--°C'
                 : Number.isFinite(kwhVal)
-                ? `${kwhVal.toFixed(1)} kWh`
+                ? `${kwhVal > 0 && kwhVal < 1 ? kwhVal.toFixed(4) : kwhVal.toFixed(1)} kWh`
                 : '-- kWh';
 
             const northRow = layout.y < 200;

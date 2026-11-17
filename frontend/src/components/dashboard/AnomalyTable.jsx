@@ -1,4 +1,14 @@
 import { CheckCircle2, MessageSquare } from 'lucide-react';
+import { format, parseISO } from 'date-fns';
+
+function formatLocalTimestamp(iso) {
+  if (!iso) return '—';
+  try {
+    return format(parseISO(iso), 'yyyy-MM-dd HH:mm');
+  } catch {
+    return iso.slice(0, 16).replace('T', ' ');
+  }
+}
 
 const SEVERITY_CONFIG = {
   Critical: { chip: 'chip-crit', row: 'bg-crit' },
@@ -57,7 +67,7 @@ export default function AnomalyTable({ anomalies, loading, onAskCopilot }) {
             {anomalies.map((anom) => {
               const severity = String(anom.severity || 'Low');
               const cfg = SEVERITY_CONFIG[severity.charAt(0).toUpperCase() + severity.slice(1).toLowerCase()] || SEVERITY_CONFIG.Low;
-              const ts  = anom.timestamp?.slice(0, 16)?.replace('T', ' ') || '—';
+              const ts = formatLocalTimestamp(anom.timestamp);
               return (
                 <tr key={anom.id} className="align-top hover:bg-sunken/70">
                   <td className="relative px-4 py-3">

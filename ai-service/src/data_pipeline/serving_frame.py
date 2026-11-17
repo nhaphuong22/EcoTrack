@@ -45,20 +45,26 @@ _cached_meta: Optional[Dict[str, Any]] = None
 _cached_hour_key: Optional[datetime] = None
 _cached_serving_frame: Optional[pd.DataFrame] = None
 _cached_xgb_model: Optional[Any] = None
+_cached_iso_model: Optional[Any] = None
 _cached_pipeline: Optional["EnergyInferencePipeline"] = None
 
 FORECAST_HORIZON_HOURS = 24
+_ZONE_SHARES: Dict[str, float] = {
+    "z1": 0.08, "z2": 0.12, "z3": 0.09, "z4": 0.11, "z5": 0.10,
+    "z6": 0.14, "z7": 0.07, "z8": 0.13, "z9": 0.06, "z10": 0.10,
+}
 
 
 def reset_serving_cache() -> None:
     """Clears all in-memory cached frames and model artifacts."""
-    global _cached_base_df, _cached_meta, _cached_hour_key, _cached_serving_frame, _cached_xgb_model, _cached_pipeline
+    global _cached_base_df, _cached_meta, _cached_hour_key, _cached_serving_frame, _cached_xgb_model, _cached_iso_model, _cached_pipeline
     with _lock:
         _cached_base_df = None
         _cached_meta = None
         _cached_hour_key = None
         _cached_serving_frame = None
         _cached_xgb_model = None
+        _cached_iso_model = None
         _cached_pipeline = None
 
 
@@ -117,35 +123,13 @@ def _load_champion_forecaster_or_fallback(xgb_path: Path) -> Any:
         raise ModelArtifactError(f"Failed to load model artifact: {exc}", file_path=str(xgb_path)) from exc
 
 
-def _load_artifacts_and_base_frame(data_path: Path, models_dir: Path) -> Tuple[pd.DataFrame, Dict[str, Any], Any]:
-    if not data_path.exists():
-        raise ServingDataError(f"Processed dataset not found at: {data_path}", path=str(data_path))
-
-    xgb_path = models_dir / "xgboost_forecaster.joblib"
-    iso_path = models_dir / "isolation_forest.joblib"
-    meta_path = models_dir / "model_metadata.json"
-
-    # Forecaster: champion-first with tri-state fallback/fail-loud (FR23). Resolved before the
-    # detector/metadata so a fully-missing models_saved/ still surfaces the forecaster artifact
-    # first (preserving the Story 1.5 error contract).
-    xgb_model = _load_champion_forecaster_or_fallback(xgb_path)
-
-    # Metadata and the Isolation Forest always come from models_saved/ (the detector keeps
-    # loading from disk; Story 4.7 opens its own MLflow run).
-    for required_file in (iso_path, meta_path):
-        if not required_file.exists():
-            raise ModelArtifactError(f"Model artifact not found: {required_file}", file_path=str(required_file))
-
-    try:
-        with open(meta_path, "r", encoding="utf-8") as f:
-            metadata = json.load(f)
-        iso_model = joblib.load(iso_path)
-    except Exception as e:
-        raise ModelArtifactError(f"Failed to load model artifact: {e}", file_path=str(models_dir))
-
-    raw_df = load_dataset(data_path)
-    df_feat = engineer_features(raw_df)
-
+def _score_feature_df(
+    df_feat: pd.DataFrame,
+    metadata: Dict[str, Any],
+    xgb_model: Any,
+    iso_model: Any,
+) -> pd.DataFrame:
+    """Apply XGBoost predictions, 95% bounds, and Isolation Forest scores to an engineered DataFrame."""
     xgb_cols = metadata["xgb_features"]
     iso_cols = metadata["iso_features"]
 
@@ -173,7 +157,7 @@ def _load_artifacts_and_base_frame(data_path: Path, models_dir: Path) -> Tuple[p
     critical_mask = is_anom & (actual > 1.30 * predicted)
     severity = np.where(~is_anom, "Normal", np.where(critical_mask, "Critical", "Medium"))
 
-    base_df = pd.DataFrame({
+    return pd.DataFrame({
         "timestamp": df_feat["timestamp"],
         "meter_reading_kwh": actual.astype(float),
         "outdoor_temperature_c": df_feat["air_temperature"].values.astype(float),
@@ -185,6 +169,51 @@ def _load_artifacts_and_base_frame(data_path: Path, models_dir: Path) -> Tuple[p
         "is_anomaly": is_anom.astype(bool),
         "severity": severity,
     })
+
+
+def _load_model_artifacts(models_dir: Path) -> Tuple[Dict[str, Any], Any, Any]:
+    xgb_path = models_dir / "xgboost_forecaster.joblib"
+    iso_path = models_dir / "isolation_forest.joblib"
+    meta_path = models_dir / "model_metadata.json"
+
+    xgb_model = _load_champion_forecaster_or_fallback(xgb_path)
+
+    for required_file in (iso_path, meta_path):
+        if not required_file.exists():
+            raise ModelArtifactError(f"Model artifact not found: {required_file}", file_path=str(required_file))
+
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            metadata = json.load(f)
+        iso_model = joblib.load(iso_path)
+    except Exception as e:
+        raise ModelArtifactError(f"Failed to load model artifact: {e}", file_path=str(models_dir))
+
+    return metadata, xgb_model, iso_model
+
+
+def _ensure_artifacts_only() -> Tuple[Dict[str, Any], Any, Any, EnergyInferencePipeline]:
+    global _cached_meta, _cached_xgb_model, _cached_iso_model, _cached_pipeline
+    with _lock:
+        if _cached_xgb_model is None or _cached_iso_model is None or _cached_meta is None:
+            models_dir = get_models_dir()
+            _cached_meta, _cached_xgb_model, _cached_iso_model = _load_model_artifacts(models_dir)
+        if _cached_pipeline is None:
+            _cached_pipeline = EnergyInferencePipeline(models_dir=get_models_dir())
+        return _cached_meta, _cached_xgb_model, _cached_iso_model, _cached_pipeline
+
+
+def _load_artifacts_and_base_frame(data_path: Path, models_dir: Path) -> Tuple[pd.DataFrame, Dict[str, Any], Any]:
+    global _cached_iso_model
+    if not data_path.exists():
+        raise ServingDataError(f"Processed dataset not found at: {data_path}", path=str(data_path))
+
+    metadata, xgb_model, iso_model = _load_model_artifacts(models_dir)
+    _cached_iso_model = iso_model
+
+    raw_df = load_dataset(data_path)
+    df_feat = engineer_features(raw_df)
+    base_df = _score_feature_df(df_feat, metadata, xgb_model, iso_model)
 
     return base_df, metadata, xgb_model
 
@@ -313,39 +342,12 @@ def get_anomaly_events(frame: Optional[pd.DataFrame] = None) -> List[Dict[str, A
     return events[::-1]
 
 
-def predict_next_24h(now: Optional[datetime] = None) -> pd.DataFrame:
-    """
-    Produces a genuine 24-hour-ahead recursive forecast anchored on the serving
-    frame's last observed hour (the current UTC hour).
-
-    The forecast covers exactly the 24 hours *after* the last observed reading.
-    Predictions come from the trained XGBoost artifact driven recursively by
-    ``EnergyInferencePipeline.predict_forecast_autoregressive`` (each step's
-    prediction becomes the next step's ``lag_1h``). 95% bounds are
-    ``predicted ± 1.96 × xgboost_metrics.rmse_kwh`` (held-out test-split RMSE),
-    with the lower bound floored at 0.
-
-    Future outdoor temperatures use a documented daily-seasonal proxy: each
-    future hour reuses the serving frame's ``outdoor_temperature_c`` from the
-    same hour on the previous day (``future_ts - 24h``).
-
-    Returns a DataFrame of 24 rows with columns:
-    ``timestamp`` (ISO 8601 UTC with ``Z``), ``predicted_kwh``,
-    ``lower_bound_95``, ``upper_bound_95``, ``outdoor_temperature_c``.
-    """
-    global _cached_pipeline
-
-    # Reuses the Story 1.1 serving cache (base frame + metadata + model loaded once).
-    frame = get_serving_frame(now)
-
-    with _lock:
-        xgb_model = _cached_xgb_model
-        meta = _cached_meta
-
-    if xgb_model is None or meta is None:
-        # Defensive: get_serving_frame populates both on success.
-        raise ModelArtifactError("XGBoost model artifact is not loaded", file_path=str(get_models_dir()))
-
+def _forecast_from_frame(
+    frame: pd.DataFrame,
+    xgb_model: Any,
+    meta: Dict[str, Any],
+    pipeline: EnergyInferencePipeline,
+) -> pd.DataFrame:
     available = len(frame)
     if available < FORECAST_HORIZON_HOURS:
         raise InsufficientHistoryError(
@@ -356,18 +358,10 @@ def predict_next_24h(now: Optional[datetime] = None) -> pd.DataFrame:
         )
 
     rmse = float(meta["xgboost_metrics"]["rmse_kwh"])
-
-    # Parse the frame's ISO-Z timestamps once (vectorized) to stay off the per-request disk/CPU budget.
-    frame_ts = pd.to_datetime(frame["timestamp"])
-
-    # Anchor on the serving frame's last row = current UTC hour.
+    frame_ts = pd.to_datetime(frame["timestamp"], utc=True).dt.tz_convert(None)
     last_ts = frame_ts.iloc[-1]
-
-    # 24 future hourly timestamps: current_hour + 1 ... current_hour + 24.
     future_dt = [last_ts + pd.Timedelta(hours=h) for h in range(1, FORECAST_HORIZON_HOURS + 1)]
 
-    # Future temperatures: same hour of the previous day (future_ts - 24h),
-    # looked up from the serving frame. Documented daily-seasonal proxy.
     temp_by_ts = dict(zip(frame_ts, frame["outdoor_temperature_c"].astype(float)))
     recent_temps = frame["outdoor_temperature_c"].to_numpy(dtype=float)
     future_temps: list = []
@@ -376,19 +370,8 @@ def predict_next_24h(now: Optional[datetime] = None) -> pd.DataFrame:
         if prior_day_ts in temp_by_ts:
             future_temps.append(float(temp_by_ts[prior_day_ts]))
         else:
-            # Contiguous hourly frame ending at the anchor: the same-hour-prior-day
-            # value is the i-th row of the trailing 24-hour window.
             future_temps.append(float(recent_temps[-FORECAST_HORIZON_HOURS + i]))
 
-    # Build the pipeline once and reuse it; its constructor reads model_metadata.json
-    # from disk, so a warm call must not re-instantiate it.
-    with _lock:
-        if _cached_pipeline is None:
-            _cached_pipeline = EnergyInferencePipeline(models_dir=get_models_dir())
-        pipeline = _cached_pipeline
-
-    # The recursive helper only consults the trailing window (last 48 readings); pass a
-    # compact slice with pre-parsed timestamps so the per-request work stays tiny.
     tail_n = min(len(frame), 48)
     recent_readings = pd.DataFrame({
         "timestamp": frame_ts.iloc[-tail_n:].to_numpy(),
@@ -405,7 +388,6 @@ def predict_next_24h(now: Optional[datetime] = None) -> pd.DataFrame:
     predicted = forecast_df["predicted_meter_reading"].to_numpy(dtype=float)
     lower_bound = np.maximum(0.0, predicted - 1.96 * rmse)
     upper_bound = predicted + 1.96 * rmse
-
     iso_timestamps = [ts.strftime("%Y-%m-%dT%H:%M:%SZ") for ts in future_dt]
 
     return pd.DataFrame({
@@ -415,3 +397,222 @@ def predict_next_24h(now: Optional[datetime] = None) -> pd.DataFrame:
         "upper_bound_95": upper_bound.astype(float),
         "outdoor_temperature_c": np.asarray(future_temps, dtype=float),
     })
+
+
+def predict_next_24h(now: Optional[datetime] = None) -> pd.DataFrame:
+    """Produces a genuine 24-hour-ahead recursive forecast anchored on the serving frame."""
+    frame = get_serving_frame(now)
+    meta, xgb_model, _, pipeline = _ensure_artifacts_only()
+    return _forecast_from_frame(frame, xgb_model, meta, pipeline)
+
+
+def _prepare_hourly_live_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame(columns=["timestamp", "meter_reading", "air_temperature"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).dt.tz_convert(None)
+    df["meter_reading"] = pd.to_numeric(df["meter_reading_kwh"], errors="coerce")
+    if "outdoor_temperature_c" in df.columns:
+        df["air_temperature"] = pd.to_numeric(df["outdoor_temperature_c"], errors="coerce").fillna(26.0)
+    else:
+        df["air_temperature"] = 26.0
+    df = df.dropna(subset=["timestamp", "meter_reading"]).sort_values("timestamp").reset_index(drop=True)
+    return df[["timestamp", "meter_reading", "air_temperature"]]
+
+
+def _calibrate_live_scale(
+    raw_df: pd.DataFrame,
+    meta: Dict[str, Any],
+    xgb_model: Any,
+    iso_model: Any,
+) -> float:
+    """Estimate live-vs-training scale ratio when a building's kWh differs materially from BDG2."""
+    df_feat = engineer_features(raw_df)
+    if df_feat.empty or len(raw_df) < 2:
+        return 1.0
+    obs_med = float(np.median(raw_df["meter_reading"]))
+    if obs_med <= 0:
+        return 1.0
+
+    # Two fixed-point steps align lag inputs into XGBoost's trained manifold.
+    scale = 1.0
+    for step in range(2):
+        scaled_df = raw_df.copy()
+        scaled_df["meter_reading"] = scaled_df["meter_reading"] / scale
+        feat = engineer_features(scaled_df)
+        if feat.empty:
+            return 1.0
+        scored = _score_feature_df(feat, meta, xgb_model, iso_model)
+        pred_med = float(np.median(scored["predicted_kwh"])) * scale
+        if pred_med <= 0:
+            return 1.0
+        ratio = obs_med / pred_med
+        if step == 0 and 0.75 <= ratio <= 1.35:
+            return 1.0
+        scale = float(np.clip(scale * ratio, 0.05, 5.0))
+    return scale
+
+
+def predict_next_24h_from_series(rows: List[Dict[str, Any]]) -> pd.DataFrame:
+    """Produces a 24-hour-ahead XGBoost forecast anchored on live DB hourly readings."""
+    meta, xgb_model, iso_model, pipeline = _ensure_artifacts_only()
+    clean = _prepare_hourly_live_df(rows)
+    if clean.empty:
+        return predict_next_24h()
+
+    scale = _calibrate_live_scale(clean, meta, xgb_model, iso_model)
+    norm_df = clean.copy()
+    if scale != 1.0:
+        norm_df["meter_reading"] = norm_df["meter_reading"] / scale
+    frame = norm_df.rename(columns={"meter_reading": "meter_reading_kwh", "air_temperature": "outdoor_temperature_c"})
+    fc = _forecast_from_frame(frame, xgb_model, meta, pipeline)
+
+    if scale != 1.0:
+        # Also anchor against autoregressive drift if recursive horizon diverges from recent 24h median.
+        obs_tail_med = float(np.median(clean["meter_reading"].tail(24)))
+        raw_fc_med = float(np.median(fc["predicted_kwh"] * scale))
+        drift_adj = 1.0
+        if raw_fc_med > 0 and obs_tail_med > 0:
+            r = obs_tail_med / raw_fc_med
+            if r < 0.75 or r > 1.35:
+                drift_adj = float(np.clip(r, 0.25, 4.0))
+        eff = scale * drift_adj
+        rmse_scaled = float(meta["xgboost_metrics"]["rmse_kwh"]) * eff
+        fc["predicted_kwh"] = (fc["predicted_kwh"] * eff).round(2)
+        fc["lower_bound_95"] = np.maximum(0.0, fc["predicted_kwh"] - 1.96 * rmse_scaled).round(2)
+        fc["upper_bound_95"] = (fc["predicted_kwh"] + 1.96 * rmse_scaled).round(2)
+    return fc
+
+
+def score_timeseries_from_series(rows: List[Dict[str, Any]], limit: int = 168) -> pd.DataFrame:
+    """Score live hourly DB rows through XGBoost and Isolation Forest for chart overlay."""
+    meta, xgb_model, iso_model, _ = _ensure_artifacts_only()
+    raw_df = _prepare_hourly_live_df(rows)
+    scale = _calibrate_live_scale(raw_df, meta, xgb_model, iso_model)
+    norm_df = raw_df.copy()
+    if scale != 1.0:
+        norm_df["meter_reading"] = norm_df["meter_reading"] / scale
+    df_feat = engineer_features(norm_df)
+    if df_feat.empty:
+        return get_serving_frame().tail(limit).reset_index(drop=True)
+    scored = _score_feature_df(df_feat, meta, xgb_model, iso_model)
+    if scale != 1.0:
+        rmse_scaled = float(meta["xgboost_metrics"]["rmse_kwh"]) * scale
+        scored["meter_reading_kwh"] = (scored["meter_reading_kwh"].to_numpy(dtype=float) * scale).round(2)
+        scored["predicted_kwh"] = (scored["predicted_kwh"].to_numpy(dtype=float) * scale).round(2)
+        scored["residual"] = (scored["meter_reading_kwh"] - scored["predicted_kwh"]).round(2)
+        scored["lower_bound_95"] = np.maximum(0.0, scored["predicted_kwh"] - 1.96 * rmse_scaled).round(2)
+        scored["upper_bound_95"] = (scored["predicted_kwh"] + 1.96 * rmse_scaled).round(2)
+    scored["timestamp"] = pd.to_datetime(scored["timestamp"]).dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return scored.tail(limit).reset_index(drop=True)
+
+
+def score_live_readings(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Score newly ingested meter readings using XGBoost expected load, Isolation Forest,
+    and each meter's rolling baseline rate to detect real-time anomalies.
+    """
+    if not items:
+        return []
+    meta, xgb_model, iso_model, _ = _ensure_artifacts_only()
+
+    # Optional hourly reference lookup from base dataset when building series is unavailable.
+    with _lock:
+        base_df = _cached_base_df
+    tariff_vnd = get_tariff_rate_vnd()
+    tariff_usd = get_tariff_rate_usd()
+
+    min_score = float(meta["isolation_forest_metrics"]["anomaly_score_min"])
+    max_score = float(meta["isolation_forest_metrics"]["anomaly_score_max"])
+    xgb_cols = meta["xgb_features"]
+    iso_cols = meta["iso_features"]
+
+    events: List[Dict[str, Any]] = []
+    for item in items:
+        ts = pd.to_datetime(item["timestamp"], utc=True).tz_convert(None)
+        hour = int(ts.hour)
+        dayofweek = int(ts.day_of_week)
+        is_weekend = int(dayofweek >= 5)
+        hour_sin = float(np.sin(2.0 * np.pi * hour / 24.0))
+        hour_cos = float(np.cos(2.0 * np.pi * hour / 24.0))
+        temp_c = float(item.get("outdoor_temperature_c") if item.get("outdoor_temperature_c") is not None else 26.0)
+
+        interval_s = float(item.get("interval_seconds") or 3600.0)
+        interval_s = max(1.0, interval_s)
+        raw_kwh = float(item["meter_reading_kwh"])
+        hourly_kwh = max(0.0, raw_kwh * (3600.0 / interval_s))
+
+        # Expected building-level hourly load from XGBoost when trailing lags are supplied,
+        # else matching (dayofweek, hour) median from base frame, else 200.0 kWh/h.
+        bldg_series = item.get("recent_building_hourly_kwhs") or []
+        if len(bldg_series) >= 24:
+            lag_1h = float(bldg_series[-1])
+            lag_24h = float(bldg_series[-24])
+            x_xgb = pd.DataFrame([{
+                "air_temperature": temp_c, "hour": hour, "dayofweek": dayofweek,
+                "is_weekend": is_weekend, "hour_sin": hour_sin, "hour_cos": hour_cos,
+                "lag_1h": lag_1h, "lag_24h": lag_24h,
+            }])[xgb_cols]
+            predicted_bldg_kwh = max(10.0, float(xgb_model.predict(x_xgb)[0]))
+        elif base_df is not None and not base_df.empty:
+            ts_series = pd.to_datetime(base_df["timestamp"])
+            matched = base_df[(ts_series.dt.day_of_week == dayofweek) & (ts_series.dt.hour == hour)]
+            predicted_bldg_kwh = float(matched["meter_reading_kwh"].median()) if not matched.empty else float(base_df["meter_reading_kwh"].median())
+        else:
+            predicted_bldg_kwh = 200.0
+
+        zone_id = item.get("zone_id")
+        zone_share = _ZONE_SHARES.get(zone_id, 0.10 if zone_id else 1.0)
+        meter_hist = [float(v) for v in (item.get("recent_meter_hourly_kwhs") or []) if isinstance(v, (int, float)) and np.isfinite(v) and v > 0]
+        expected_meter_kwh = float(np.median(meter_hist)) if len(meter_hist) >= 3 else (predicted_bldg_kwh * zone_share)
+        expected_meter_kwh = max(0.05, expected_meter_kwh)
+
+        ratio = hourly_kwh / expected_meter_kwh
+        scaled_bldg_kwh = ratio * predicted_bldg_kwh
+
+        x_iso = pd.DataFrame([{
+            "meter_reading": scaled_bldg_kwh,
+            "air_temperature": temp_c,
+            "hour": hour,
+            "dayofweek": dayofweek,
+            "is_weekend": is_weekend,
+            "hour_sin": hour_sin,
+            "hour_cos": hour_cos,
+            "lag_1h": predicted_bldg_kwh,
+            "lag_24h": predicted_bldg_kwh,
+        }])[iso_cols]
+        raw_decision = float(iso_model.decision_function(x_iso)[0])
+        pred_label = int(iso_model.predict(x_iso)[0])
+        norm_score = (
+            float(np.clip((-raw_decision - min_score) / (max_score - min_score), 0.0, 1.0))
+            if max_score > min_score else 0.5
+        )
+        iso_flagged = (pred_label == -1) and (ratio >= 1.25)
+        if not (iso_flagged or ratio >= 1.6):
+            continue
+
+        delta_kwh = max(0.0, hourly_kwh - expected_meter_kwh)
+        severity = "CRITICAL" if (ratio >= 2.0 or (iso_flagged and ratio >= 1.5)) else "MEDIUM"
+        score = round(max(norm_score, 0.72 if severity == "CRITICAL" else 0.55), 4)
+        iso_ts = ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+        bldg_id = item.get("building_id", "office_tower_01")
+        zone_label = f"Khu vực {zone_id}" if zone_id else "Tổng tòa nhà"
+
+        events.append({
+            "building_id": bldg_id,
+            "zone_id": zone_id,
+            "meter_id": item.get("meter_id"),
+            "timestamp": iso_ts,
+            "subsystem": f"{zone_label} (Live)",
+            "severity": severity,
+            "anomaly_score": score,
+            "actual_kwh": round(hourly_kwh, 3),
+            "predicted_kwh": round(expected_meter_kwh, 3),
+            "delta_kwh": round(delta_kwh, 3),
+            "outdoor_temp_c": round(temp_c, 1),
+            "estimated_waste_vnd": round(delta_kwh * tariff_vnd, 0),
+            "estimated_waste_usd": round(delta_kwh * tariff_usd, 2),
+            "description": f"Live load spike ({ratio:.2f}x expected rate) at {zone_label}",
+            "suggested_action": f"Inspect HVAC and equipment draw in {zone_label}.",
+        })
+    return events

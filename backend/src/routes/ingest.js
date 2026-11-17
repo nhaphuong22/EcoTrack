@@ -10,6 +10,7 @@ const ReadingItemSchema = z.object({
   zone_id: z.string().min(1).max(50).optional().nullable(),
   timestamp: z.string().datetime({ offset: true }).transform((val) => new Date(val)),
   meter_reading_kwh: z.number().finite().nonnegative(),
+  interval_seconds: z.number().finite().positive().max(86400).optional(),
   outdoor_temperature_c: z.number().finite().optional().nullable(),
   relative_humidity_pct: z.number().finite().min(0).max(100).optional().nullable(),
 });

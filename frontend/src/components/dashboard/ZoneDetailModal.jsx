@@ -32,7 +32,7 @@ export default function ZoneDetailModal({ zone, isOpen, onClose, onAskCopilot })
     ? `${reading.outdoor_temperature_c.toFixed(1)}°C`
     : 'N/A';
   const kwh = Number.isFinite(reading.meter_reading_kwh)
-    ? `${reading.meter_reading_kwh.toFixed(1)} kWh`
+    ? `${reading.meter_reading_kwh > 0 && reading.meter_reading_kwh < 1 ? reading.meter_reading_kwh.toFixed(4) : reading.meter_reading_kwh.toFixed(1)} kWh`
     : 'N/A';
   const humidity = Number.isFinite(reading.relative_humidity_pct)
     ? `${Math.round(reading.relative_humidity_pct)}%`
