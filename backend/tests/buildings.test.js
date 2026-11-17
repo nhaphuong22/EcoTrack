@@ -105,7 +105,7 @@ describe('CRUD Buildings & History Endpoints in Express Backend', () => {
       });
 
       const res = await request(app)
-        .post('/api/v1/buildings').set('X-Operator-Key', process.env.OPERATOR_API_KEY)
+        .post('/api/v1/buildings')
         .send(newBuildingPayload);
 
       expect(res.status).toBe(201);
@@ -117,7 +117,7 @@ describe('CRUD Buildings & History Endpoints in Express Backend', () => {
       mockPrisma.building.findUnique.mockResolvedValue(mockBuilding1);
 
       const res = await request(app)
-        .post('/api/v1/buildings').set('X-Operator-Key', process.env.OPERATOR_API_KEY)
+        .post('/api/v1/buildings')
         .send({
           id: 'office_tower_01',
           name: 'Duplicate Tower',
@@ -129,7 +129,7 @@ describe('CRUD Buildings & History Endpoints in Express Backend', () => {
 
     it('should return 422 Unprocessable Entity when validation fails (missing required name)', async () => {
       const res = await request(app)
-        .post('/api/v1/buildings').set('X-Operator-Key', process.env.OPERATOR_API_KEY)
+        .post('/api/v1/buildings')
         .send({
           id: 'invalid_tower',
           // missing name

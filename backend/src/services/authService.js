@@ -48,8 +48,17 @@ const isCurrent = (member, now = new Date()) => member.starts_at <= now
   && member.household.starts_at <= now && (!member.household.ends_at || member.household.ends_at > now)
   && member.household.unit.active;
 
+// Operator role: platform admin is ADMIN; building staff is MANAGER if any MANAGER row, else TECHNICIAN; residents have none.
+function operatorRole(user) {
+  if (user?.is_platform_admin) return 'ADMIN';
+  const staff = user?.staff || [];
+  if (staff.some((item) => item.role === 'MANAGER')) return 'MANAGER';
+  return staff.length ? 'TECHNICIAN' : null;
+}
+
 function publicUser(user) {
   return { id: user.id, name: user.name, email: user.email, is_platform_admin: user.is_platform_admin,
+    role: operatorRole(user),
     google_linked: Boolean(user.google_sub),
     staff: (user.staff || []).map((staff) => ({ building_id: staff.building_id, role: staff.role, building: staff.building })),
     households: (user.memberships || []).filter((member) => isCurrent(member)).map((member) => ({
@@ -59,4 +68,4 @@ function publicUser(user) {
   };
 }
 module.exports = { hashPassword, verifyPassword, hashToken, startSession, sessionCookie,
-  tokenFrom, resolveSession, publicUser, isCurrent };
+  tokenFrom, resolveSession, publicUser, isCurrent, operatorRole };

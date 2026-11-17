@@ -90,14 +90,21 @@ describe('Resident account portal', () => {
     expect(accountApi.get).toHaveBeenCalledWith('/api/v1/portal/overview', { params: { building_id: building.id, scope: 'building' } });
     expect(screen.queryByRole('button', { name: 'Dashboard hệ thống' })).not.toBeInTheDocument();
   });
-  it('allows only a platform administrator to open and return from the original dashboard', async () => {
-    currentUser = { ...resident, households: [], is_platform_admin: true };
+  it('allows an operator role to open and return from the original dashboard', async () => {
+    currentUser = { ...resident, households: [], is_platform_admin: true, role: 'ADMIN' };
     render(<AccountPortal />);
     fireEvent.click(await screen.findByRole('button', { name: 'Dashboard hệ thống' }));
     expect(await screen.findByText('Original system dashboard')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Về cổng cư dân' }));
     expect(await screen.findByRole('button', { name: 'Dashboard hệ thống' })).toBeInTheDocument();
     expect(screen.queryByText('Original system dashboard')).not.toBeInTheDocument();
+  });
+
+  it('lets building staff (TECHNICIAN) open the operations dashboard', async () => {
+    currentUser = { ...resident, households: [], role: 'TECHNICIAN', staff: [{ building_id: building.id, role: 'TECHNICIAN' }] };
+    render(<AccountPortal />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Dashboard hệ thống' }));
+    expect(await screen.findByText('Original system dashboard')).toBeInTheDocument();
   });
 
   it('accepts an invitation then refreshes household membership', async () => {

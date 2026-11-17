@@ -1,6 +1,7 @@
 const express = require('express');
 const { InMemoryTTLCache } = require('../utils/cache');
 const { callAIService, AIServiceError } = require('../utils/aiClient');
+const { requireRole } = require('../middleware/requireUser');
 
 const router = express.Router();
 
@@ -45,7 +46,7 @@ function sendUpstreamError(err, res, next) {
 }
 
 // GET /api/v1/mlops/status
-router.get('/status', async (req, res, next) => {
+router.get('/status', requireRole('ADMIN', 'MANAGER'), async (req, res, next) => {
   try {
     const cached = statusCache.get(STATUS_KEY);
     if (cached !== null) {
@@ -62,7 +63,7 @@ router.get('/status', async (req, res, next) => {
 });
 
 // POST /api/v1/mlops/retrain — client body is never forwarded.
-router.post('/retrain', async (req, res, next) => {
+router.post('/retrain', requireRole('ADMIN'), async (req, res, next) => {
   if (retrainRateLimited(req.ip)) {
     res.setHeader('Retry-After', '60');
     return res.status(429).json({ detail: 'Too many retrain requests. Try again shortly.', status: 429 });

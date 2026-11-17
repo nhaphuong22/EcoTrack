@@ -163,9 +163,10 @@ export default function AccountPortal() {
 
   if (checking) return <main className="grid min-h-screen place-items-center bg-ground text-sm text-muted">Đang kiểm tra phiên đăng nhập…</main>;
 
-  if (user?.is_platform_admin && adminDashboard) return <>
+  // Any operator role (ADMIN, MANAGER, TECHNICIAN) may open the operations dashboard; residents have no role.
+  if (user?.role && adminDashboard) return <>
     <ShellBar navLabel="Điều hướng quản trị">
-      <span className="mr-2 text-sm text-shell-muted">Quản trị hệ thống · {user.name}</span>
+      <span className="mr-2 text-sm text-shell-muted">Vận hành · {user.name} ({user.role})</span>
       <button className="btn btn-shell btn-sm" onClick={() => setAdminDashboard(false)}>Về cổng cư dân</button>
       <button className="btn btn-shell btn-sm" onClick={logout}>Đăng xuất</button>
     </ShellBar>
@@ -213,7 +214,7 @@ export default function AccountPortal() {
   return <div className="min-h-screen bg-ground">
     <ShellBar context="Năng lượng cư dân" navLabel="Tài khoản">
       <span className="mr-1 text-sm font-medium text-white">{user.name}</span>
-      {user.is_platform_admin && <button className="btn btn-shell btn-sm" onClick={() => setAdminDashboard(true)}>Dashboard hệ thống</button>}
+      {user.role && <button className="btn btn-shell btn-sm" onClick={() => setAdminDashboard(true)}>Dashboard hệ thống</button>}
       {!user.google_linked && <a className="btn btn-shell btn-sm" href={`${API_BASE_URL}/api/v1/auth/google/start`}>Liên kết Google</a>}
       <button onClick={logout} className="btn btn-shell btn-sm">Đăng xuất</button>
     </ShellBar>

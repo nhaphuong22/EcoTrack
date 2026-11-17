@@ -37,7 +37,7 @@ describe('Anomaly Lifecycle Endpoints in Express Backend', () => {
       mockPrisma.anomalyEvent.updateMany.mockResolvedValue({ count: 1 });
 
       const res = await request(app)
-        .patch('/api/v1/anomalies/ANOM-1234/status').set('X-Operator-Key', process.env.OPERATOR_API_KEY)
+        .patch('/api/v1/anomalies/ANOM-1234/status')
         .send({
           status: 'ACKNOWLEDGED',
           note: 'Operator checking BMS logs.',
@@ -52,7 +52,7 @@ describe('Anomaly Lifecycle Endpoints in Express Backend', () => {
 
     it('should return 422 for invalid status value', async () => {
       const res = await request(app)
-        .patch('/api/v1/anomalies/ANOM-1234/status').set('X-Operator-Key', process.env.OPERATOR_API_KEY)
+        .patch('/api/v1/anomalies/ANOM-1234/status')
         .send({
           status: 'INVALID_STATUS',
         });
@@ -64,7 +64,7 @@ describe('Anomaly Lifecycle Endpoints in Express Backend', () => {
       mockPrisma.anomalyEvent.findUnique.mockResolvedValue(null);
 
       const res = await request(app)
-        .patch('/api/v1/anomalies/NON_EXISTENT/status').set('X-Operator-Key', process.env.OPERATOR_API_KEY)
+        .patch('/api/v1/anomalies/NON_EXISTENT/status')
         .send({
           status: 'RESOLVED',
         });

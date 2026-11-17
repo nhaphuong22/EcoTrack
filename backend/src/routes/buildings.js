@@ -1,7 +1,7 @@
 const express = require('express');
 const { z } = require('zod');
 const buildingService = require('../services/buildingService');
-const { requireApiKey } = require('../middleware/apiKey');
+const { requireRole } = require('../middleware/requireUser');
 
 const router = express.Router();
 
@@ -42,7 +42,7 @@ router.get('/:id', async (req, res, next) => {
 });
 
 // POST /api/v1/buildings
-router.post('/', requireApiKey('OPERATOR_API_KEY', 'X-Operator-Key'), async (req, res, next) => {
+router.post('/', requireRole('ADMIN'), async (req, res, next) => {
   try {
     const data = BuildingCreateSchema.parse(req.body);
     const existing = await buildingService.getBuildingById(data.id);

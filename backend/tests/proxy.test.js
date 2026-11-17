@@ -9,7 +9,7 @@ describe('Express Proxy Routes with Mocked Fetch', () => {
 
   beforeEach(() => {
     // Clear cache before each test
-    request(app).post('/api/v1/energy/cache/clear').set('X-Operator-Key', process.env.OPERATOR_API_KEY);
+    request(app).post('/api/v1/energy/cache/clear');
     mockPrisma.conversation.createMany.mockResolvedValue({ count: 2 });
   });
 
@@ -59,7 +59,7 @@ describe('Express Proxy Routes with Mocked Fetch', () => {
     });
 
     // Clear cache first
-    await request(app).post('/api/v1/energy/cache/clear').set('X-Operator-Key', process.env.OPERATOR_API_KEY);
+    await request(app).post('/api/v1/energy/cache/clear');
 
     // First request -> MISS
     const res1 = await request(app).get('/api/v1/energy/metrics');

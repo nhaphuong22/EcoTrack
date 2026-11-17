@@ -2,6 +2,7 @@ import { meterMock } from './helpers/adminApp';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import app from './helpers/adminApp';
+import sessionApp from '../src/app';
 import buildings from '../src/services/buildingService';
 import ingest from '../src/services/ingestService';
 import anomalies from '../src/services/anomalyService';
@@ -111,10 +112,10 @@ describe('Business regressions', () => {
     await expect(anomalies.updateAnomalyStatus(event.id, 'RESOLVED')).rejects.toMatchObject({ status: 409 });
   });
 
-  it('requires operator credentials on mutation endpoints', async () => {
-    expect((await request(app).post('/api/v1/buildings').send({ id: 'x', name: 'x' })).status).toBe(401);
-    expect((await request(app).patch('/api/v1/anomalies/a/status').send({ status: 'RESOLVED' })).status).toBe(401);
-    expect((await request(app).post('/api/v1/energy/cache/clear')).status).toBe(401);
+  it('requires a signed-in operator on mutation endpoints', async () => {
+    expect((await request(sessionApp).post('/api/v1/buildings').send({ id: 'x', name: 'x' })).status).toBe(401);
+    expect((await request(sessionApp).patch('/api/v1/anomalies/a/status').send({ status: 'RESOLVED' })).status).toBe(401);
+    expect((await request(sessionApp).post('/api/v1/energy/cache/clear')).status).toBe(401);
   });
 
   it('fails closed when ingest credentials are not configured', async () => {

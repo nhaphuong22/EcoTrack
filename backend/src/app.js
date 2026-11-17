@@ -16,7 +16,7 @@ const mlopsRouter = require('./routes/mlops');
 const healthRouter = require('./routes/health');
 const authRouter = require('./routes/auth');
 const portalRouter = require('./routes/portal');
-const { requireUser, requirePlatformAdmin } = require('./middleware/requireUser');
+const { requireUser, requireRole } = require('./middleware/requireUser');
 
 function createApp({ authenticate = requireUser } = {}) {
 const app = express();
@@ -58,7 +58,7 @@ app.use('/api/v1/portal', authenticate, portalRouter);
 // Sensor ingestion has a dedicated machine credential. No resident session can
 // access unscoped legacy APIs; operators use the scoped portal as well.
 app.use('/api/v1/ingest', ingestRouter);
-app.use('/api/v1', authenticate, requirePlatformAdmin);
+app.use('/api/v1', authenticate, requireRole());
 
 // Mount domain routes under /api/v1
 app.use('/api/v1/buildings', buildingsRouter);

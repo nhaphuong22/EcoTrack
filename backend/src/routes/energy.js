@@ -2,7 +2,7 @@ const express = require('express');
 const { energyCache } = require('../utils/cache');
 const { callAIService } = require('../utils/aiClient');
 const { z } = require('zod');
-const { requireApiKey } = require('../middleware/apiKey');
+const { requireRole } = require('../middleware/requireUser');
 
 const router = express.Router();
 
@@ -53,7 +53,7 @@ router.get('/cache/stats', (req, res) => {
 });
 
 // POST /api/v1/energy/cache/clear
-router.post('/cache/clear', requireApiKey('OPERATOR_API_KEY', 'X-Operator-Key'), (req, res) => {
+router.post('/cache/clear', requireRole('ADMIN'), (req, res) => {
   energyCache.clear();
   res.json({ message: 'Energy TTL cache invalidated successfully.' });
 });
