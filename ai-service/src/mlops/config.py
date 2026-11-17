@@ -13,6 +13,7 @@ safe to import from the serving process and from plain-Python tools (AD-1).
 
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 
@@ -125,3 +126,39 @@ def is_mlflow_initialised(tracking_uri: str | None = None) -> bool:
     if db_path is not None:
         return db_path.exists()
     return True
+
+
+def scheduler_enabled() -> bool:
+    """
+    True when the daily MLOps drift-check scheduler should run in FastAPI lifespan.
+    Defaults to enabled at runtime; disabled via ``ECOTRACK_SCHEDULER_ENABLED=0``
+    in tests.
+    """
+    val = os.getenv("ECOTRACK_SCHEDULER_ENABLED", "").strip().lower()
+    if not val:
+        return True
+    return val not in ("0", "false", "no", "off")
+
+
+def _parse_env_float(name: str, default: float, minimum: float) -> float:
+    raw = os.getenv(name, "").strip()
+    val = default if not raw else float(raw)
+    if not math.isfinite(val):
+        raise ValueError(f"{name} must be a finite number; got {raw!r}")
+    return max(minimum, val)
+
+
+def get_scheduler_interval_seconds() -> float:
+    """Interval in seconds between scheduled drift checks (default: 86400s / 24h)."""
+    return _parse_env_float("ECOTRACK_SCHEDULER_INTERVAL_SECONDS", 86400.0, 0.05)
+
+
+def get_scheduler_initial_delay_seconds() -> float:
+    """Initial delay in seconds before the first scheduled drift check (default: 10s)."""
+    return _parse_env_float("ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS", 10.0, 0.0)
+
+
+def get_drift_recent_path() -> Path | None:
+    """Optional override CSV path for the recent window checked by the daily job."""
+    val = os.getenv("ECOTRACK_DRIFT_RECENT_PATH", "").strip()
+    return Path(val) if val else None

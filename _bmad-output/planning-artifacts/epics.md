@@ -16,6 +16,22 @@ story48Refinement:
     methods: [assumption-audit, failure-mode-analysis, boundary-edge-case-sweep, problem-decomposition, second-order-thinking]
     status: trimmed-via-party-mode
     accepted: 2026-11-16
+story49Refinement:
+  scope: 4-9-retrain-automatically-when-the-model-degrades
+  stepsCompleted:
+    - step-01-validate-prerequisites
+    - step-02-design-epics
+    - step-03-create-stories
+    - step-04-final-validation
+  status: completed
+  partyMode:
+    status: accepted-via-party-mode
+    accepted: 2026-11-17
+  inputDocuments:
+    - _bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/prd.md
+    - _bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/addendum.md
+    - _bmad-output/planning-artifacts/architecture/architecture-EcoTrack-2026-09-23/ARCHITECTURE-SPINE.md
+    - _bmad-output/planning-artifacts/epics.md
 inputDocuments:
   - plan.md
   - _bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/prd.md
@@ -87,6 +103,48 @@ Following Advanced Elicitation and Party Mode review, the product owner approved
 1. **Fair Holdout (No Temporal Leakage):** Evaluate both `champion` and `challenger` on a shared chronological holdout window strictly after the training cutoff of both models, using an identical MAPE rule with documented handling for zero targets (`y == 0`) and rejecting non-finite (`NaN`/`Inf`) scores. Promote only when `challenger_mape < champion_mape`.
 2. **Safe Hot-Reload:** Verify that the challenger artifact loads cleanly before updating the MLflow `champion` alias under `.champion.lock` and calling `reset_serving_cache()` in `serving_frame.py`. If promotion or reload fails, preserve the existing usable champion.
 3. **Three-State History & Lock Safety (`promoted` | `rejected` | `failed`):** Use an atomic in-process lock to return HTTP 409 on concurrent requests, always release the lock in a `finally` block across every terminal path, and persist history records (`run_id`, `timestamp`, `trigger`, `champion_mape`, `challenger_mape`, `outcome`, and optional `reason`) via a reusable retrain coordinator in `ai-service/src/mlops/` that Story 4.9 and Story 4.10 can consume.
+
+## Story 4.9 refinement — Requirements extraction (2026-11-17)
+
+Scope and source selection confirmed by the product owner (explicitly excluding `plan.md`). This scoped pass reuses the existing inventory and epic structure; Story 4.9 wording and acceptance criteria have been refined and validated.
+
+### Functional requirements in scope
+
+- FR25 (automatic / scheduled portion) & PRD FR-5: run a scheduled daily job that calls the Story 4.6 drift check (`drift.check()`) and triggers retraining (`run_retrain()`) only when `drift_detected` is `true`.
+- FR25 (trigger & signal attribution): classify automatic retrain `trigger` as `"mape"` when only `"rolling_mape"` triggered, or `"drift"` when `"meter_reading"` or `"air_temperature"` triggered (including when accompanied by `"rolling_mape"`), and persist the full `triggered_signals` list in `signals` on the `retrain_history.json` record.
+- FR25 (configuration & testability): allow disabling the background scheduler via configuration (defaulting to disabled in tests) and expose the daily job function as plain Python directly callable in `pytest`.
+- FR24 dependency (Story 4.6): reuse `ai-service/src/mlops/drift.py` (`drift.check()`) and its configured thresholds.
+- FR25 dependency (Story 4.8): reuse `ai-service/src/mlops/retrain.py` (`run_retrain()`) and its guarded holdout promotion / `_retrain_lock` (`RetrainAlreadyRunningError` handled safely by logging and skipping without crashing the scheduler).
+- FR26 downstream readiness (Story 4.10): persist the latest drift check snapshot (`drift_status.json` in `get_models_dir()` with `checked_at` in ISO 8601 UTC) after every job execution (even when `drift_detected` is `false`).
+
+### Applicable non-functional requirements
+
+- NFR5: drift checking and retraining execute on CPU.
+- NFR6 / AD-2: scheduled background checks and retraining must not block the FastAPI event loop.
+- NFR7 / AD-5: all persisted timestamps (`checked_at`, history entries) use ISO 8601 UTC (`Z`).
+- NFR8: provide offline `pytest` coverage without starting FastAPI or running heavy BDG2 training jobs.
+
+### Architecture and scope boundaries
+
+- AD-1 (hexagonal boundary): keep the check/retrain decision logic and scheduler helper as plain Python under `ai-service/src/mlops/`; wire only startup/shutdown lifecycle hooks in `ai-service/src/main.py`.
+- Dependency boundary (`plan.md` excluded): no APScheduler dependency is mandated by the remaining sources; implement the daily scheduler using Python stdlib (`threading.Event` + daemon `threading.Thread` with configurable interval) without adding external packages.
+- Default window resolution: construct `reference_df` (first 80% chronological split) and `recent_df` (trailing 168 hours) from `get_data_path()`, while allowing callers/tests to inject `reference_df` / `recent_df` directly.
+- Out of scope: `GET /internal/mlops/status` (Story 4.10), gateway proxy (Story 4.11), UI (Story 4.12), RBAC (Epic 5).
+
+### Proposed epic placement and coverage
+
+- Retain **Story 4.9** within existing **Epic 4: Self-Monitoring Model Lifecycle**; do not split scheduler wiring and drift-check orchestration into separate epics or stories.
+- User outcome: an admin can rely on daily automated drift monitoring that refreshes the model only when degradation is detected and still enforces Story 4.8's guarded promotion rules.
+- FR coverage mapping: **FR25 (automatic retraining)** and **PRD FR-5** map to **Epic 4 / Story 4.9**, building on **FR24 (Story 4.6)** and **FR25 manual coordinator (Story 4.8)** while supplying `drift_status.json` and triggered history entries for **FR26 (Story 4.10)**.
+- Independence: fully functional via Python module and FastAPI lifecycle without requiring Stories 4.10–4.12 or Epic 5.
+
+Epic placement approved by the product owner on 2026-11-17; the global epic list and FR coverage map remain unchanged.
+
+### Accepted refinements after Party Mode review (2026-11-17)
+
+1. **Stdlib Daily Scheduler (No APScheduler):** With `plan.md` excluded, run the daily drift check using Python stdlib (`threading.Event` + daemon `threading.Thread`) managed via FastAPI `lifespan` (`stop_event.set()` + bounded `join()` on shutdown) in `ai-service/src/main.py`, with a configurable interval (default `86400`s / 24h) and a short configurable initial delay (`ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS`, default `10`s so startup health checks complete before the first check populates `drift_status.json`). `ECOTRACK_SCHEDULER_ENABLED` defaults to enabled at runtime (matching `docker-compose.yml` out of the box) and is disabled via configuration in `ai-service/tests/conftest.py`. Errors during any scheduled tick are logged and do not terminate the scheduler loop or FastAPI process.
+2. **Recent-Window Resolution & Test Injection:** Resolve `reference_df` as the chronological first 80% of `get_data_path()` and `recent_df` from optional `ECOTRACK_DRIFT_RECENT_PATH` (falling back to the unmodified baseline dataset at `get_data_path()`, whose trailing 168h are scored for rolling MAPE), while letting the plain-Python job accept `reference_df` / `recent_df` directly in tests without adding a cooldown/dedup layer not requested by FR25. If a drifted demo scenario causes `run_retrain()` to reject an inferior/unchanged challenger, preserving the champion as `rejected` is the intended guarded-promotion behavior.
+3. **Observability & Trigger Rules:** Persist `get_models_dir() / "drift_status.json"` on every scheduled check with `checked_at` (ISO 8601 UTC), `drift_detected`, `triggered_signals`, `signals`, `rolling_mape`, `thresholds`, `retrain_triggered`, and optional `retrain_run_id` for Story 4.10/4.12. Classify automatic retrain `trigger` as `"mape"` when only `"rolling_mape"` triggered, else `"drift"`, passing `signals=triggered_signals` into `run_retrain(...)`, and log-and-skip safely on `RetrainAlreadyRunningError`.
 
 ## Overview
 
@@ -962,24 +1020,35 @@ So that a manual retrain refreshes the model safely and never degrades productio
 ### Story 4.9: Retrain automatically when the model degrades
 
 As an admin,
-I want the system to check for drift every day and retrain when needed,
-So that the model stays accurate without someone watching it.
+I want the system to check for drift every day and automatically trigger guarded retraining when the model degrades,
+So that forecast quality stays reliable without manual monitoring.
 
-**Implements:** FR25
+**Implements:** FR25, PRD FR-5, NFR5, NFR6, NFR7, NFR8 (builds on FR24, Story 4.6, Story 4.8, AD-1)
 
 **Acceptance Criteria:**
 
-**Given** the AI service is running with the scheduler enabled
-**When** the daily job fires
-**Then** it runs the drift check from Story 4.6 and starts a retrain only if `drift_detected` is true
+**Given** the AI service runs with `ECOTRACK_SCHEDULER_ENABLED` enabled (default at runtime)
+**When** the FastAPI application starts and enters its lifespan
+**Then** a stdlib background scheduler (`threading.Event` + daemon `threading.Thread`, without external scheduler packages) waits `ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS` (default `10`s) before executing the first check and repeats every `ECOTRACK_SCHEDULER_INTERVAL_SECONDS` (default `86400`s) without blocking the FastAPI event loop
+**And** on application shutdown, the scheduler sets its stop event and performs a bounded thread join so no background thread leaks
 
-**Given** an automatic retrain
-**When** it is recorded
-**Then** the history entry has the trigger `drift` or `mape` and the signals that caused it
+**Given** the plain-Python daily check function in `ai-service/src/mlops/`
+**When** it runs (using `reference_df` from the first 80% of `get_data_path()` and `recent_df` from `ECOTRACK_DRIFT_RECENT_PATH` or the unmodified baseline dataset at `get_data_path()`, or caller-supplied `reference_df`/`recent_df` frames in tests)
+**Then** it executes Story 4.6's `drift.check(...)` and persists the latest snapshot (`checked_at` in ISO 8601 UTC, `drift_detected`, `triggered_signals`, `signals`, `rolling_mape`, `thresholds`, `retrain_triggered`, and `retrain_run_id`) atomically to `get_models_dir() / "drift_status.json"`
+**And** when `drift_detected` is `false`, it does not call `run_retrain(...)` and writes nothing to `retrain_history.json`
 
-**Given** the test environment
-**When** the service starts
-**Then** the scheduler is disabled through configuration, and the job function can be called directly in tests
+**Given** `drift.check(...)` returns `drift_detected: true`
+**When** the daily check triggers Story 4.8's `run_retrain(...)`
+**Then** `trigger` is set to `"mape"` when `triggered_signals == ["rolling_mape"]`, and `"drift"` when any distribution signal (`"meter_reading"` or `"air_temperature"`) triggered (even if accompanied by `"rolling_mape"`)
+**And** the full `triggered_signals` list is passed as `signals` and persisted in `retrain_history.json`, while Story 4.8's guarded promotion (`challenger_mape < champion_mape`) determines whether the challenger becomes `champion`
+
+**Given** a manual or prior retrain already holds `_retrain_lock` (`RetrainAlreadyRunningError`), or an unexpected error occurs during a scheduled check tick
+**When** the scheduled job runs
+**Then** it logs the condition/error cleanly without crashing the scheduler loop or FastAPI process, preserving subsequent scheduled ticks
+
+**Given** the test environment (`ai-service/tests/conftest.py`) or `ECOTRACK_SCHEDULER_ENABLED` set to a falsy value
+**When** the FastAPI app starts
+**Then** the background scheduler does not start, and the plain-Python daily check job remains directly importable and runnable in `pytest` without FastAPI
 
 ### Story 4.10: Report model and drift status
 

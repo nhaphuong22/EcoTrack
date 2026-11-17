@@ -1,3 +1,5 @@
+import asyncio
+from contextlib import asynccontextmanager
 import hmac
 import os
 import sys
@@ -22,11 +24,22 @@ if str(AI_SERVICE_DIR) not in sys.path:
 load_dotenv(AI_SERVICE_DIR / ".env")
 
 from src.api.routers import energy, forecast, anomalies, copilot, mlops
+from src.mlops.scheduler import start_scheduler, stop_scheduler
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    start_scheduler()
+    try:
+        yield
+    finally:
+        await asyncio.to_thread(stop_scheduler)
+
 
 app = FastAPI(
     title="EcoTrack - Building Energy AI Engine",
     version="1.0.0",
-    description="Dedicated AI & Analytics microservice for building energy forecasting (XGBoost), anomaly detection (Isolation Forest), and conversational AI Copilot."
+    description="Dedicated AI & Analytics microservice for building energy forecasting (XGBoost), anomaly detection (Isolation Forest), and conversational AI Copilot.",
+    lifespan=lifespan,
 )
 
 # CORS configuration
