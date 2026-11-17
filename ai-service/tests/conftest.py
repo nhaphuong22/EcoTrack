@@ -60,6 +60,7 @@ def setup_test_environment():
     old_scheduler_interval = os.environ.get("ECOTRACK_SCHEDULER_INTERVAL_SECONDS")
     old_scheduler_delay = os.environ.get("ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS")
     old_drift_recent = os.environ.get("ECOTRACK_DRIFT_RECENT_PATH")
+    old_benchmark_results = os.environ.get("ECOTRACK_BENCHMARK_RESULTS_PATH")
 
     os.environ["ECOTRACK_DATA_PATH"] = str(fixture_csv)
     os.environ["ECOTRACK_MODELS_DIR"] = str(temp_models_dir)
@@ -69,10 +70,13 @@ def setup_test_environment():
     # champion-load tests opt back in with their own temp store (Story 4.5).
     os.environ["ECOTRACK_DISABLE_MLFLOW"] = "1"
     # Keep background drift-check scheduler disabled across the test suite (Story 4.9).
+    # Set optional Story 4.9 overrides to empty string rather than popping so load_dotenv(override=False)
+    # cannot re-inject developer .env values later in test execution.
     os.environ["ECOTRACK_SCHEDULER_ENABLED"] = "0"
-    os.environ.pop("ECOTRACK_SCHEDULER_INTERVAL_SECONDS", None)
-    os.environ.pop("ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS", None)
-    os.environ.pop("ECOTRACK_DRIFT_RECENT_PATH", None)
+    os.environ["ECOTRACK_SCHEDULER_INTERVAL_SECONDS"] = ""
+    os.environ["ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS"] = ""
+    os.environ["ECOTRACK_DRIFT_RECENT_PATH"] = ""
+    os.environ["ECOTRACK_BENCHMARK_RESULTS_PATH"] = str(temp_models_dir / "benchmark_results.json")
     reset_serving_cache()
 
     yield {
@@ -122,6 +126,11 @@ def setup_test_environment():
         os.environ["ECOTRACK_DRIFT_RECENT_PATH"] = old_drift_recent
     else:
         os.environ.pop("ECOTRACK_DRIFT_RECENT_PATH", None)
+
+    if old_benchmark_results is not None:
+        os.environ["ECOTRACK_BENCHMARK_RESULTS_PATH"] = old_benchmark_results
+    else:
+        os.environ.pop("ECOTRACK_BENCHMARK_RESULTS_PATH", None)
 
     shutil.rmtree(temp_dir, ignore_errors=True)
 

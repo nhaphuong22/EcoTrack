@@ -57,7 +57,7 @@ def get_tracking_uri() -> str:
     connection works regardless of the process CWD. The URI is a runtime
     connection string, not data persisted inside the registry.
     """
-    env = os.getenv("MLFLOW_TRACKING_URI")
+    env = os.getenv("MLFLOW_TRACKING_URI", "").strip()
     if env:
         return env
     db_path = mlruns_dir() / "mlflow.db"
@@ -124,7 +124,7 @@ def is_mlflow_initialised(tracking_uri: str | None = None) -> bool:
     uri = tracking_uri or get_tracking_uri()
     db_path = _sqlite_path_from_uri(uri)
     if db_path is not None:
-        return db_path.exists()
+        return db_path.is_file() and db_path.stat().st_size > 0
     return True
 
 
@@ -140,25 +140,48 @@ def scheduler_enabled() -> bool:
     return val not in ("0", "false", "no", "off")
 
 
-def _parse_env_float(name: str, default: float, minimum: float) -> float:
-    raw = os.getenv(name, "").strip()
-    val = default if not raw else float(raw)
+def validate_duration_seconds(
+    value: object,
+    name: str,
+    minimum: float = 0.0,
+    allow_zero: bool = True,
+) -> float:
+    """Validate and normalize a finite duration in seconds without coercing booleans."""
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite number, not bool; got {value!r}")
+    val = float(value)
     if not math.isfinite(val):
-        raise ValueError(f"{name} must be a finite number; got {raw!r}")
+        raise ValueError(f"{name} must be a finite number; got {value!r}")
+    if val <= 0.0 if not allow_zero else val < 0.0:
+        constraint = "> 0" if not allow_zero else ">= 0"
+        raise ValueError(f"{name} must be {constraint}; got {value!r}")
     return max(minimum, val)
+
+
+def _parse_env_float(name: str, default: float, minimum: float, allow_zero: bool = True) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    return validate_duration_seconds(raw, name=name, minimum=minimum, allow_zero=allow_zero)
 
 
 def get_scheduler_interval_seconds() -> float:
     """Interval in seconds between scheduled drift checks (default: 86400s / 24h)."""
-    return _parse_env_float("ECOTRACK_SCHEDULER_INTERVAL_SECONDS", 86400.0, 0.05)
+    return _parse_env_float("ECOTRACK_SCHEDULER_INTERVAL_SECONDS", 86400.0, 0.05, allow_zero=False)
 
 
 def get_scheduler_initial_delay_seconds() -> float:
     """Initial delay in seconds before the first scheduled drift check (default: 10s)."""
-    return _parse_env_float("ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS", 10.0, 0.0)
+    return _parse_env_float("ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS", 10.0, 0.0, allow_zero=True)
 
 
 def get_drift_recent_path() -> Path | None:
     """Optional override CSV path for the recent window checked by the daily job."""
     val = os.getenv("ECOTRACK_DRIFT_RECENT_PATH", "").strip()
     return Path(val) if val else None
+
+
+def get_benchmark_results_path() -> Path:
+    """Path to benchmark ``results.json`` (overridable via ``ECOTRACK_BENCHMARK_RESULTS_PATH``)."""
+    val = os.getenv("ECOTRACK_BENCHMARK_RESULTS_PATH", "").strip()
+    return Path(val) if val else AI_SERVICE_DIR / "experiments" / "benchmark" / "results.json"

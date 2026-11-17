@@ -22,3 +22,15 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-7-measure-anomaly-detector-quality.md`
   summary: `generate_scenario_hvac_night_overrun`'s final fallback (`target_start_idx = 22` when no weekday-22:00 row is found anywhere in the dataset) injects two of its eight anomalous rows (indices 22-23) inside the first-24-row window `engineer_features()` drops for lag warm-up, silently undercounting `positive_count` by up to 2 when `evaluate()` scores that scenario.
   evidence: Real but pre-existing (the fallback itself predates this story; this story only added the label that now makes the undercount visible/measurable) and very low-probability to trigger — it requires no weekday-22:00 row anywhere in at least the first ~10 days of hourly data, which no real BDG2 building sample or the committed test fixture actually hits (both logged `target_start_idx` around index 166-200+ in this session's testing). Fixing it means nudging the pre-existing fallback constant in `demo_scenarios.py`, touching code outside this story's stated scope for a condition not observed to occur with any real data in this project.
+
+## Deferred from: code review of spec-4-9-retrain-automatically-when-the-model-degrades (2026-11-17)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-9-retrain-automatically-when-the-model-degrades.md`
+  summary: `ai-service/src/main.py` lines 10-15 import `src.config` and `src.data_pipeline.serving_frame` before `sys.path.insert` and `load_dotenv()` at lines 17-22.
+  evidence: Pre-existing bootstrap ordering from Stories 4.1–4.7 outside Story 4.9 diff scope (`from src.mlops.scheduler import start_scheduler, stop_scheduler` at `main.py:25` is already after `load_dotenv()`, and Story 4.9 config helpers read `os.getenv()` lazily at runtime rather than import time). (blind-hunter finding #6, pre-existing)
+
+## Deferred from: bmad-build blind-hunter review of story-4.10 (2026-11-17)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-10-report-model-and-drift-status.md`
+  summary: `register_and_bootstrap_champion` constructs `MlflowClient()` without passing `tracking_uri` (`ai-service/src/mlops/tracking.py:124`) and `champion_health` maps unexpected exceptions to `"unavailable"` instead of `"broken"` (`ai-service/src/mlops/tracking.py:394-395`).
+  evidence: Pre-existing Story 4.5 code untouched by Story 4.10; `register_and_bootstrap_champion` callers invoke `configure(tracking_uri)` beforehand, and `champion_health` keeps Story 4.5 `/health` behavior unchanged. (blind-hunter finding #10, pre-existing)

@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -116,6 +118,7 @@ def register_and_bootstrap_champion(
     already exists the alias is left untouched (promotion is Story 4.8).
     """
     from filelock import FileLock
+    from mlflow.exceptions import MlflowException
     from mlflow.tracking import MlflowClient
 
     lock = FileLock(str(_champion_lock_path(tracking_uri)))
@@ -126,8 +129,17 @@ def register_and_bootstrap_champion(
         try:
             existing = client.get_model_version_by_alias(name, CHAMPION_ALIAS)
             existing_version = str(existing.version)
-        except Exception:
-            existing_version = None
+        except MlflowException as exc:
+            if _is_not_found(exc):
+                # Genuinely no champion yet -> safe to bootstrap below.
+                existing_version = None
+            else:
+                # A non not-found error (e.g. a locked SQLite backend) must NOT be
+                # mistaken for "no champion": treating it as absent would overwrite an
+                # existing champion and break set-if-absent. Fail loud instead.
+                raise ChampionArtifactError(
+                    f"Could not read champion alias during bootstrap: {exc}"
+                ) from exc
 
         if existing_version is None:
             client.set_registered_model_alias(name, CHAMPION_ALIAS, version)
@@ -354,3 +366,153 @@ def load_champion_forecaster(tracking_uri: Optional[str] = None) -> Tuple[Any, s
 
     logger.info("Loaded champion %s version %s.", REGISTERED_MODEL_NAME, version)
     return model, version
+
+
+def champion_health(tracking_uri: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Champion status for the health check. Never raises.
+
+    Actually loads the champion artifact (no caching — one load per probe) so that
+    ``/health`` agrees with what serving does, instead of reporting a champion that
+    serving cannot load. Returns one of:
+
+    * ``{"status": "resolved",    "version": <v>}``  — champion resolves and loads,
+    * ``{"status": "broken",      "version": <v>}``  — alias resolves but the artifact
+      fails to load / the backend is locked (serving would surface 503),
+    * ``{"status": "unavailable", "version": None}`` — MLflow disabled / not installed /
+      not initialised / no champion alias (serving falls back to ``models_saved/``).
+    """
+    if mlflow_disabled():
+        return {"status": "unavailable", "version": None}
+    try:
+        _model, version = load_champion_forecaster(tracking_uri)
+        return {"status": "resolved", "version": version}
+    except ChampionUnavailable:
+        return {"status": "unavailable", "version": None}
+    except ChampionArtifactError as exc:
+        return {"status": "broken", "version": getattr(exc, "version", None)}
+    except Exception:  # defensive: health must never raise
+        return {"status": "unavailable", "version": None}
+
+
+def _epoch_ms_to_iso_utc(ts_ms: Any) -> Optional[str]:
+    if ts_ms is None or isinstance(ts_ms, bool):
+        return None
+    try:
+        val = float(ts_ms)
+        if not math.isfinite(val):
+            return None
+        return datetime.fromtimestamp(val / 1000.0, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _verify_champion_artifacts(client: Any, version: str, uri: str) -> Optional[str]:
+    """Verify ``MLmodel`` and declared flavor artifacts exist without deserializing the binary."""
+    import mlflow
+    import yaml
+
+    dl_uri = client.get_model_version_download_uri(REGISTERED_MODEL_NAME, version)
+    artifacts = mlflow.artifacts.list_artifacts(artifact_uri=dl_uri, tracking_uri=uri)
+    by_name = {Path(a.path).name: a for a in artifacts}
+    mlmodel_entry = by_name.get("MLmodel")
+    if mlmodel_entry is None or mlmodel_entry.is_dir or (mlmodel_entry.file_size or 0) <= 0:
+        return f"Champion model version {version} is missing MLmodel metadata."
+
+    mlmodel_path = mlflow.artifacts.download_artifacts(
+        artifact_uri=f"{dl_uri.rstrip('/')}/MLmodel",
+        tracking_uri=uri,
+        registry_uri=uri,
+    )
+    doc = yaml.safe_load(Path(mlmodel_path).read_text(encoding="utf-8")) or {}
+    flavors = doc.get("flavors") if isinstance(doc, dict) else None
+    if isinstance(flavors, dict):
+        for cfg in flavors.values():
+            if not isinstance(cfg, dict):
+                continue
+            rel = cfg.get("data") or cfg.get("model_path")
+            if isinstance(rel, str) and rel.strip():
+                top_name = Path(rel.strip()).parts[0]
+                entry = by_name.get(top_name)
+                if entry is None or (not entry.is_dir and (entry.file_size or 0) <= 0):
+                    return f"Champion model version {version} is missing model artifact '{rel}'."
+    return None
+
+
+def get_champion_metadata(tracking_uri: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Lightweight champion inspection for MLOps status reporting (Story 4.10 — FR26).
+
+    Reads alias, run timestamp, and finite metrics via ``MlflowClient`` and checks
+    ``MLmodel`` + declared artifact presence without deserializing the XGBoost model.
+    Returns ``{"status": "resolved" | "unavailable" | "broken", ...}``.
+    """
+    clean_uri = tracking_uri.strip() if isinstance(tracking_uri, str) else None
+    effective_uri = clean_uri or None
+    if mlflow_disabled() or not mlflow_available() or not is_mlflow_initialised(effective_uri):
+        return {"status": "unavailable", "version": None, "trained_at": None, "metrics": None, "error": None}
+
+    from mlflow.exceptions import MlflowException
+    from mlflow.tracking import MlflowClient
+
+    uri = effective_uri or get_tracking_uri()
+    try:
+        client = MlflowClient(tracking_uri=uri)
+        mv = client.get_model_version_by_alias(REGISTERED_MODEL_NAME, CHAMPION_ALIAS)
+    except MlflowException as exc:
+        if _is_not_found(exc):
+            return {"status": "unavailable", "version": None, "trained_at": None, "metrics": None, "error": None}
+        return {
+            "status": "broken",
+            "version": None,
+            "trained_at": None,
+            "metrics": None,
+            "error": f"Could not resolve champion alias: {exc}",
+        }
+    except Exception as exc:
+        return {
+            "status": "broken",
+            "version": None,
+            "trained_at": None,
+            "metrics": None,
+            "error": f"Could not resolve champion alias: {exc}",
+        }
+
+    version = str(mv.version)
+    try:
+        artifact_err = _verify_champion_artifacts(client, version, uri)
+        if artifact_err:
+            return {
+                "status": "broken",
+                "version": version,
+                "trained_at": None,
+                "metrics": None,
+                "error": artifact_err,
+            }
+        run = client.get_run(mv.run_id) if getattr(mv, "run_id", None) else None
+        ts_ms = (
+            (run.info.end_time or run.info.start_time) if run is not None else None
+        ) or getattr(mv, "creation_timestamp", None)
+        trained_at = _epoch_ms_to_iso_utc(ts_ms)
+        raw_metrics = run.data.metrics if run is not None else {}
+        metrics = {
+            str(k): float(v)
+            for k, v in raw_metrics.items()
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v))
+        }
+    except Exception as exc:
+        return {
+            "status": "broken",
+            "version": version,
+            "trained_at": None,
+            "metrics": None,
+            "error": f"Champion model version {version} metadata or artifacts unreadable: {exc}",
+        }
+
+    return {
+        "status": "resolved",
+        "version": version,
+        "trained_at": trained_at,
+        "metrics": metrics,
+        "error": None,
+    }
