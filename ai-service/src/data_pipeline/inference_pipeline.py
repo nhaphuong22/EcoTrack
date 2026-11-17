@@ -180,7 +180,7 @@ class EnergyInferencePipeline:
             temp = float(future_temperatures[i])
 
             hour = int(ts.hour)
-            dayofweek = int(ts.dayofweek)
+            dayofweek = int(ts.day_of_week)
             is_weekend = int(dayofweek >= 5)
 
             hour_sin = float(np.sin(2 * np.pi * hour / 24.0))
@@ -275,7 +275,7 @@ class EnergyInferencePipeline:
 
         # Feature transformations
         combined["hour"] = combined["timestamp"].dt.hour.astype(int)
-        combined["dayofweek"] = combined["timestamp"].dt.dayofweek.astype(int)
+        combined["dayofweek"] = combined["timestamp"].dt.day_of_week.astype(int)
         combined["is_weekend"] = (combined["dayofweek"] >= 5).astype(int)
 
         combined["hour_sin"] = np.sin(2 * np.pi * combined["hour"] / 24.0)

@@ -218,7 +218,7 @@ def get_serving_frame(now: Optional[datetime] = None) -> pd.DataFrame:
         target_hour = now_hour.hour
 
         ts = _cached_base_df["timestamp"]
-        matches = _cached_base_df[(ts.dt.weekday == target_weekday) & (ts.dt.hour == target_hour)]
+        matches = _cached_base_df[(ts.dt.day_of_week == target_weekday) & (ts.dt.hour == target_hour)]
         if matches.empty:
             raise ServingDataError(
                 f"No matching row found for weekday {target_weekday} and hour {target_hour}",

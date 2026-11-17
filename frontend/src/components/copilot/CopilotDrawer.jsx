@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, Send, Trash2, Loader2 } from 'lucide-react';
+import { X, Send, Trash2, Loader2, Square, RotateCcw } from 'lucide-react';
 import BrandMark from '../layout/BrandMark';
 import ChatMessage from './ChatMessage';
 import QuickPrompts from './QuickPrompts';
@@ -10,6 +10,8 @@ export default function CopilotDrawer({
   isLoading = false,
   error = null,
   sendMessage,
+  stopStreaming,
+  retry,
   clearHistory,
 }) {
   const [input, setInput] = useState('');
@@ -89,15 +91,29 @@ export default function CopilotDrawer({
           {messages.map((m, i) => <ChatMessage key={i} message={m} />)}
 
           {isLoading && (
-            <div className="flex items-center gap-2 text-xs text-muted" role="status">
-              <Loader2 size={14} className="animate-spin" aria-hidden="true" />
-              Đang phân tích...
+            <div className="flex items-center justify-between gap-3 text-xs text-muted" role="status">
+              <span className="flex items-center gap-2">
+                <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                Đang trả lời...
+              </span>
+              {stopStreaming && (
+                <button id="copilot-stop-btn" onClick={stopStreaming} className="btn btn-quiet btn-sm" title="Dừng phản hồi">
+                  <Square size={11} aria-hidden="true" />
+                  <span>Dừng</span>
+                </button>
+              )}
             </div>
           )}
 
           {error && (
-            <div role="alert" className="rounded-md border border-crit/30 bg-crit-bg px-4 py-2.5 text-xs text-crit">
-              {error}
+            <div role="alert" className="flex items-center justify-between rounded-md border border-crit/30 bg-crit-bg px-4 py-2.5 text-xs text-crit">
+              <span>{error}</span>
+              {retry && (
+                <button id="copilot-retry-btn" onClick={retry} className="ml-2 flex items-center gap-1 font-semibold underline">
+                  <RotateCcw size={12} aria-hidden="true" />
+                  <span>Thử lại</span>
+                </button>
+              )}
             </div>
           )}
           <div ref={bottomRef} />
@@ -119,16 +135,28 @@ export default function CopilotDrawer({
               placeholder="Nhập câu hỏi về năng lượng... (Enter để gửi)"
               className="field flex-1 resize-none"
             />
-            <button
-              id="copilot-send-btn"
-              onClick={handleSend}
-              disabled={isLoading || !input.trim()}
-              className="btn btn-primary px-4"
-              title="Gửi (Enter)"
-              aria-label="Gửi"
-            >
-              {isLoading ? <Loader2 size={17} className="animate-spin" aria-hidden="true" /> : <Send size={17} aria-hidden="true" />}
-            </button>
+            {isLoading && stopStreaming ? (
+              <button
+                id="copilot-stop-input-btn"
+                onClick={stopStreaming}
+                className="btn btn-primary px-4"
+                title="Dừng tạo phản hồi"
+                aria-label="Dừng"
+              >
+                <Square size={16} aria-hidden="true" />
+              </button>
+            ) : (
+              <button
+                id="copilot-send-btn"
+                onClick={handleSend}
+                disabled={isLoading || !input.trim()}
+                className="btn btn-primary px-4"
+                title="Gửi (Enter)"
+                aria-label="Gửi"
+              >
+                {isLoading ? <Loader2 size={17} className="animate-spin" aria-hidden="true" /> : <Send size={17} aria-hidden="true" />}
+              </button>
+            )}
           </div>
         </div>
       </aside>

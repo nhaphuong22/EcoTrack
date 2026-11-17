@@ -106,7 +106,7 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # Temporal features
     df["hour"] = df["timestamp"].dt.hour
-    df["dayofweek"] = df["timestamp"].dt.dayofweek
+    df["dayofweek"] = df["timestamp"].dt.day_of_week
     df["is_weekend"] = (df["dayofweek"] >= 5).astype(int)
 
     # Cyclical angle transformations

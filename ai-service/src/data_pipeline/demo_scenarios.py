@@ -84,7 +84,7 @@ def generate_scenario_hvac_night_overrun(
     target_start_idx = None
     for i in range(24, len(df) - 10):
         ts = df.loc[i, "timestamp"]
-        if ts.dayofweek == 0 and ts.hour == 22:
+        if ts.day_of_week == 0 and ts.hour == 22:
             target_start_idx = i
             break
 
@@ -92,7 +92,7 @@ def generate_scenario_hvac_night_overrun(
     if target_start_idx is None:
         for i in range(24, len(df) - 10):
             ts = df.loc[i, "timestamp"]
-            if ts.dayofweek < 4 and ts.hour == 22:
+            if ts.day_of_week < 4 and ts.hour == 22:
                 target_start_idx = i
                 break
 
@@ -152,7 +152,7 @@ def generate_scenario_peak_hour_spike(
     target_day_idx = None
     for i in range(24, len(df) - 30):
         ts = df.loc[i, "timestamp"]
-        if ts.dayofweek == 1 and ts.hour == 0:  # Tuesday midnight start
+        if ts.day_of_week == 1 and ts.hour == 0:  # Tuesday midnight start
             target_day_idx = i
             break
 

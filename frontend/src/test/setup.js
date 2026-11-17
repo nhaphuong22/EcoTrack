@@ -10,3 +10,16 @@ global.ResizeObserver = global.ResizeObserver || class ResizeObserver {
   unobserve() {}
   disconnect() {}
 };
+
+const defaultTestUser = {
+  id: 'usr_admin_01',
+  email: 'admin@ecotrack.io',
+  name: 'Building Admin',
+  role: 'ADMIN',
+};
+
+if (typeof localStorage !== 'undefined') {
+  localStorage.setItem('ecotrack_user', JSON.stringify(defaultTestUser));
+  localStorage.setItem('ecotrack_access_token', 'mock_test_access_token');
+  localStorage.setItem('ecotrack_refresh_token', 'mock_test_refresh_token');
+}
