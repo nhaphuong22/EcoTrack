@@ -448,7 +448,7 @@ def _calibrate_live_scale(
         if pred_med <= 0:
             return 1.0
         ratio = obs_med / pred_med
-        if step == 0 and 0.75 <= ratio <= 1.35:
+        if step == 0 and 0.85 <= ratio <= 1.18:
             return 1.0
         scale = float(np.clip(scale * ratio, 0.05, 5.0))
     return scale
@@ -468,16 +468,16 @@ def predict_next_24h_from_series(rows: List[Dict[str, Any]]) -> pd.DataFrame:
     frame = norm_df.rename(columns={"meter_reading": "meter_reading_kwh", "air_temperature": "outdoor_temperature_c"})
     fc = _forecast_from_frame(frame, xgb_model, meta, pipeline)
 
-    if scale != 1.0:
-        # Also anchor against autoregressive drift if recursive horizon diverges from recent 24h median.
-        obs_tail_med = float(np.median(clean["meter_reading"].tail(24)))
-        raw_fc_med = float(np.median(fc["predicted_kwh"] * scale))
-        drift_adj = 1.0
-        if raw_fc_med > 0 and obs_tail_med > 0:
-            r = obs_tail_med / raw_fc_med
-            if r < 0.75 or r > 1.35:
-                drift_adj = float(np.clip(r, 0.25, 4.0))
-        eff = scale * drift_adj
+    # Also anchor against autoregressive drift if recursive horizon diverges from recent 24h median.
+    obs_tail_med = float(np.median(clean["meter_reading"].tail(24)))
+    raw_fc_med = float(np.median(fc["predicted_kwh"] * scale))
+    drift_adj = 1.0
+    if raw_fc_med > 0 and obs_tail_med > 0:
+        r = obs_tail_med / raw_fc_med
+        if r < 0.75 or r > 1.35:
+            drift_adj = float(np.clip(r, 0.25, 4.0))
+    eff = scale * drift_adj
+    if eff != 1.0:
         rmse_scaled = float(meta["xgboost_metrics"]["rmse_kwh"]) * eff
         fc["predicted_kwh"] = (fc["predicted_kwh"] * eff).round(2)
         fc["lower_bound_95"] = np.maximum(0.0, fc["predicted_kwh"] - 1.96 * rmse_scaled).round(2)
