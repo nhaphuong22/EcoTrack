@@ -1,0 +1,8 @@
+.git
+node_modules/
+.deepeval/
+coverage/
+*.log
+.env
+.env.*
+!.env.example

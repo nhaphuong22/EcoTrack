@@ -1,7 +1,8 @@
 const prisma = require('../db');
 const readingStreamService = require('./readingStreamService');
+const anomalyService = require('./anomalyService');
 
-// ponytail: single-batch createMany with skipDuplicates; partition or stream if ingestion volume exceeds 10k/s
+// RETURNING distinguishes committed inserts from rows skipped as duplicates.
 async function ingestReadings(readings) {
   if (!Array.isArray(readings) || readings.length === 0) {
     return { stored: 0 };
@@ -44,23 +45,42 @@ async function ingestReadings(readings) {
   }
 
   // 3. Persist batch with duplicate skipping
-  const records = readings.map((r) => ({
-    building_id: r.building_id,
-    zone_id: r.zone_id || null,
-    timestamp: r.timestamp instanceof Date ? r.timestamp : new Date(r.timestamp),
-    meter_reading_kwh: r.meter_reading_kwh,
-    outdoor_temperature_c: r.outdoor_temperature_c ?? null,
-    relative_humidity_pct: r.relative_humidity_pct ?? null,
-  }));
+  const meters = await prisma.meter.findMany({ where: { building_id: { in: buildingIds } } });
+  const meterMap = new Map(meters.map((meter) => [`${meter.building_id}:${meter.zone_id || ''}`, meter.id]));
+  for (const reading of readings) {
+    if (!meterMap.has(`${reading.building_id}:${reading.zone_id || ''}`)) {
+      const error = new Error('Meter is not provisioned for this building/zone.');
+      error.status = 422;
+      throw error;
+    }
+  }
+  const intervalByKey = new Map();
+  const records = readings.map((r) => {
+    const ts = r.timestamp instanceof Date ? r.timestamp : new Date(r.timestamp);
+    if (typeof r.interval_seconds === 'number' && Number.isFinite(r.interval_seconds)) {
+      intervalByKey.set(`${r.building_id}:${r.zone_id || ''}:${ts.toISOString()}`, r.interval_seconds);
+    }
+    return {
+      meter_id: meterMap.get(`${r.building_id}:${r.zone_id || ''}`),
+      building_id: r.building_id,
+      zone_id: r.zone_id || null,
+      timestamp: ts,
+      meter_reading_kwh: r.meter_reading_kwh,
+      outdoor_temperature_c: r.outdoor_temperature_c ?? null,
+      relative_humidity_pct: r.relative_humidity_pct ?? null,
+    };
+  });
 
-  const result = await prisma.meterReading.createMany({
+  const inserted = await prisma.meterReading.createManyAndReturn({
     data: records,
     skipDuplicates: true,
   });
 
-  if (result.count > 0) {
-    for (const r of records) {
+  // Skip per-reading SSE broadcast & live anomaly scoring for large historical backfill batches.
+  if (inserted.length > 0 && inserted.length <= 20) {
+    for (const r of inserted) {
       readingStreamService.broadcastReading({
+        meter_id: r.meter_id,
         building_id: r.building_id,
         zone_id: r.zone_id,
         timestamp: r.timestamp.toISOString(),
@@ -69,9 +89,10 @@ async function ingestReadings(readings) {
         relative_humidity_pct: r.relative_humidity_pct,
       });
     }
+    await anomalyService.evaluateLiveReadings(inserted, intervalByKey);
   }
 
-  return { stored: result.count };
+  return { stored: inserted.length };
 }
 
 module.exports = {

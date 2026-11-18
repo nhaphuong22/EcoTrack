@@ -1,59 +1,14 @@
 import axios from 'axios';
-import { getStoredAuth, refreshApi, clearAuthTokens } from './auth';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
-export const apiClient = axios.create({
+const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
+  withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 });
-
-// Request Interceptor: Attach Bearer Access Token
-apiClient.interceptors.request.use(
-  (config) => {
-    const { token } = getStoredAuth();
-    if (token && !config.headers.Authorization) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-// Response Interceptor: Silent Refresh on 401
-apiClient.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    const originalRequest = error.config;
-
-    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
-      originalRequest._retry = true;
-      const { refreshToken } = getStoredAuth();
-
-      if (refreshToken) {
-        try {
-          const newAuth = await refreshApi(refreshToken);
-          originalRequest.headers.Authorization = `Bearer ${newAuth.token}`;
-          return apiClient(originalRequest);
-        } catch (refreshErr) {
-          clearAuthTokens();
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new Event('auth:logout'));
-          }
-          return Promise.reject(refreshErr);
-        }
-      } else {
-        clearAuthTokens();
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('auth:logout'));
-        }
-      }
-    }
-
-    return Promise.reject(error);
-  }
-);
+export const accountApi = apiClient;
 
 /** GET /api/v1/energy/metrics */
 export const fetchMetrics = () =>
@@ -72,11 +27,12 @@ export const fetchForecast = () =>
   apiClient.get('/api/v1/forecast/predict').then(r => r.data);
 
 /** POST /api/v1/copilot/chat */
-export const sendCopilotMessage = (message, buildingId = 'office_tower_01', history = []) =>
+export const sendCopilotMessage = (message, buildingId = 'office_tower_01', history = [], sessionId) =>
   apiClient.post('/api/v1/copilot/chat', {
     message,
     building_id: buildingId,
     history,
+    session_id: sessionId,
   }).then(r => r.data);
 
 /** POST /api/v1/copilot/chat/stream */
@@ -100,6 +56,7 @@ export async function streamCopilotMessage({
       history,
     }),
     signal,
+    credentials: 'include',
   });
 
   if (!response.ok) {

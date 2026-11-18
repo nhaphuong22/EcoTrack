@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from src.data_pipeline.serving_frame import reset_serving_cache
+from src.mlops.scheduler import stop_scheduler
 from src.models.train_models import (
     ISO_FEATURE_COLUMNS,
     XGB_FEATURE_COLUMNS,
@@ -54,10 +55,28 @@ def setup_test_environment():
     old_data_path = os.environ.get("ECOTRACK_DATA_PATH")
     old_models_dir = os.environ.get("ECOTRACK_MODELS_DIR")
     old_internal_key = os.environ.get("INTERNAL_API_KEY")
+    old_disable_mlflow = os.environ.get("ECOTRACK_DISABLE_MLFLOW")
+    old_scheduler_enabled = os.environ.get("ECOTRACK_SCHEDULER_ENABLED")
+    old_scheduler_interval = os.environ.get("ECOTRACK_SCHEDULER_INTERVAL_SECONDS")
+    old_scheduler_delay = os.environ.get("ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS")
+    old_drift_recent = os.environ.get("ECOTRACK_DRIFT_RECENT_PATH")
+    old_benchmark_results = os.environ.get("ECOTRACK_BENCHMARK_RESULTS_PATH")
 
     os.environ["ECOTRACK_DATA_PATH"] = str(fixture_csv)
     os.environ["ECOTRACK_MODELS_DIR"] = str(temp_models_dir)
     os.environ["INTERNAL_API_KEY"] = "test-internal-token"
+    # Default the suite to the models_saved/ serving path so a stray MLflow store on the
+    # owner's machine cannot leak a real champion into fixture-based tests. The dedicated
+    # champion-load tests opt back in with their own temp store (Story 4.5).
+    os.environ["ECOTRACK_DISABLE_MLFLOW"] = "1"
+    # Keep background drift-check scheduler disabled across the test suite (Story 4.9).
+    # Set optional Story 4.9 overrides to empty string rather than popping so load_dotenv(override=False)
+    # cannot re-inject developer .env values later in test execution.
+    os.environ["ECOTRACK_SCHEDULER_ENABLED"] = "0"
+    os.environ["ECOTRACK_SCHEDULER_INTERVAL_SECONDS"] = ""
+    os.environ["ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS"] = ""
+    os.environ["ECOTRACK_DRIFT_RECENT_PATH"] = ""
+    os.environ["ECOTRACK_BENCHMARK_RESULTS_PATH"] = str(temp_models_dir / "benchmark_results.json")
     reset_serving_cache()
 
     yield {
@@ -66,6 +85,7 @@ def setup_test_environment():
         "metadata": metadata,
     }
 
+    stop_scheduler(timeout=2.0)
     reset_serving_cache()
     if old_data_path is not None:
         os.environ["ECOTRACK_DATA_PATH"] = old_data_path
@@ -81,6 +101,36 @@ def setup_test_environment():
         os.environ["INTERNAL_API_KEY"] = old_internal_key
     else:
         os.environ.pop("INTERNAL_API_KEY", None)
+
+    if old_disable_mlflow is not None:
+        os.environ["ECOTRACK_DISABLE_MLFLOW"] = old_disable_mlflow
+    else:
+        os.environ.pop("ECOTRACK_DISABLE_MLFLOW", None)
+
+    if old_scheduler_enabled is not None:
+        os.environ["ECOTRACK_SCHEDULER_ENABLED"] = old_scheduler_enabled
+    else:
+        os.environ.pop("ECOTRACK_SCHEDULER_ENABLED", None)
+
+    if old_scheduler_interval is not None:
+        os.environ["ECOTRACK_SCHEDULER_INTERVAL_SECONDS"] = old_scheduler_interval
+    else:
+        os.environ.pop("ECOTRACK_SCHEDULER_INTERVAL_SECONDS", None)
+
+    if old_scheduler_delay is not None:
+        os.environ["ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS"] = old_scheduler_delay
+    else:
+        os.environ.pop("ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS", None)
+
+    if old_drift_recent is not None:
+        os.environ["ECOTRACK_DRIFT_RECENT_PATH"] = old_drift_recent
+    else:
+        os.environ.pop("ECOTRACK_DRIFT_RECENT_PATH", None)
+
+    if old_benchmark_results is not None:
+        os.environ["ECOTRACK_BENCHMARK_RESULTS_PATH"] = old_benchmark_results
+    else:
+        os.environ.pop("ECOTRACK_BENCHMARK_RESULTS_PATH", None)
 
     shutil.rmtree(temp_dir, ignore_errors=True)
 

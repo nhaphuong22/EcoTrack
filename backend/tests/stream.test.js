@@ -1,3 +1,4 @@
+import { meterMock } from './helpers/adminApp';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import EventEmitter from 'events';
 
@@ -9,12 +10,13 @@ const mockPrisma = {
     findMany: vi.fn(),
   },
   meterReading: {
-    createMany: vi.fn(),
+    createManyAndReturn: vi.fn(),
   },
 };
+mockPrisma.meter = meterMock;
 global.__mockPrisma = mockPrisma;
 
-import app from '../src/app';
+import app from './helpers/adminApp';
 import streamRouter from '../src/routes/stream';
 import { readingEmitter, broadcastReading } from '../src/services/readingStreamService';
 import ingestService from '../src/services/ingestService';
@@ -194,7 +196,7 @@ describe('Story 2.1: Live Readings SSE Stream (/api/v1/stream/readings)', () => 
 
     mockPrisma.building.findMany.mockResolvedValueOnce([{ id: 'bldg_01' }]);
     mockPrisma.zone.findMany.mockResolvedValueOnce([{ id: 'zone_01', building_id: 'bldg_01' }]);
-    mockPrisma.meterReading.createMany.mockResolvedValueOnce({ count: 1 });
+    mockPrisma.meterReading.createManyAndReturn.mockResolvedValueOnce(mockReadings);
 
     const result = await ingestService.ingestReadings(mockReadings);
 

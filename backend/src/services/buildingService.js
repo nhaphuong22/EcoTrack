@@ -56,15 +56,23 @@ async function seedDefaultBuildingsIfNeeded() {
 }
 
 async function seedInitialReadingsIfNeeded(buildingId, sampleHours = 72) {
+  if (!DEFAULT_BUILDINGS.some((b) => b.id === buildingId)) return;
   try {
     const existingCount = await prisma.meterReading.count({
       where: { building_id: buildingId },
     });
 
-    if (existingCount >= 24) return;
+    if (existingCount > 0) return;
+
+    const { meterId } = require('./meterService');
+    const totalMeterId = meterId(buildingId);
+    await prisma.meter.upsert({ where: { id: totalMeterId }, update: {}, create: {
+      id: totalMeterId, building_id: buildingId, name: 'Building total', scope: 'BUILDING_TOTAL',
+    } });
 
     const baseTime = new Date();
-    baseTime.setHours(baseTime.getHours() - sampleHours);
+    baseTime.setUTCMinutes(0, 0, 0);
+    baseTime.setUTCHours(baseTime.getUTCHours() - sampleHours);
 
     const records = [];
     for (let h = 0; h < sampleHours; h++) {
@@ -77,6 +85,7 @@ async function seedInitialReadingsIfNeeded(buildingId, sampleHours = 72) {
       const temp = Number((26.0 + diurnal * 5.0).toFixed(1));
 
       records.push({
+        meter_id: totalMeterId,
         building_id: buildingId,
         timestamp: t,
         meter_reading_kwh: kwh,
@@ -98,7 +107,6 @@ async function seedInitialReadingsIfNeeded(buildingId, sampleHours = 72) {
 
 async function listBuildings() {
   try {
-    await seedDefaultBuildingsIfNeeded();
     const buildings = await prisma.building.findMany({
       orderBy: { created_at: 'asc' },
     });
@@ -116,11 +124,10 @@ async function listBuildings() {
 
 async function getBuildingById(id) {
   try {
-    await seedDefaultBuildingsIfNeeded();
     const building = await prisma.building.findUnique({
       where: { id },
     });
-    if (building) return building;
+    return building;
   } catch (err) {
     // Database offline fallback
   }
@@ -128,23 +135,29 @@ async function getBuildingById(id) {
 }
 
 async function createBuilding(data) {
-  return await prisma.building.create({
-    data,
+  const { meterId } = require('./meterService');
+  return prisma.$transaction(async (tx) => {
+    const building = await tx.building.create({ data });
+    await tx.meter.create({ data: { id: meterId(building.id), building_id: building.id,
+      name: 'Building total', scope: 'BUILDING_TOTAL' } });
+    return building;
   });
 }
 
-async function getBuildingHistory(buildingId, limit = 168) {
+async function getBuildingHistory(buildingId, limit = 168, zoneId = null) {
   try {
-    await seedDefaultBuildingsIfNeeded();
     const building = await prisma.building.findUnique({
       where: { id: buildingId },
     });
 
+    if (!building) return null;
     if (building) {
-      await seedInitialReadingsIfNeeded(buildingId);
-
+      if (zoneId) {
+        const zone = await prisma.zone.findFirst({ where: { id: zoneId, building_id: buildingId } });
+        if (!zone) return null;
+      }
       const readings = await prisma.meterReading.findMany({
-        where: { building_id: buildingId },
+        where: { building_id: buildingId, zone_id: zoneId },
         orderBy: { timestamp: 'desc' },
         take: limit,
       });
@@ -153,8 +166,11 @@ async function getBuildingHistory(buildingId, limit = 168) {
 
       return {
         building_id: buildingId,
+        zone_id: zoneId,
+        source: 'database',
         count: chronological.length,
         data: chronological.map((r) => ({
+          zone_id: r.zone_id ?? null,
           timestamp: r.timestamp.toISOString(),
           meter_reading_kwh: r.meter_reading_kwh,
           outdoor_temperature_c: r.outdoor_temperature_c,
@@ -169,6 +185,8 @@ async function getBuildingHistory(buildingId, limit = 168) {
   // If DB query returned no building or failed, check DEFAULT_BUILDINGS
   const knownBuilding = DEFAULT_BUILDINGS.find((b) => b.id === buildingId);
   if (!knownBuilding) return null;
+
+  if (zoneId) return { building_id: buildingId, zone_id: zoneId, source: 'demo_fallback', count: 0, data: [] };
 
   // Fallback synthetic history
   const baseTime = new Date();
@@ -186,20 +204,23 @@ async function getBuildingHistory(buildingId, limit = 168) {
     });
   }
 
+  const limitedRecords = fallbackRecords.slice(-limit);
   return {
     building_id: buildingId,
-    count: fallbackRecords.length,
-    data: fallbackRecords,
+    zone_id: null,
+    source: 'demo_fallback',
+    count: limitedRecords.length,
+    data: limitedRecords,
   };
 }
 
 async function listZonesWithLatest(buildingId) {
   try {
-    await seedDefaultBuildingsIfNeeded();
     const building = await prisma.building.findUnique({
       where: { id: buildingId },
     });
 
+    if (!building) return null;
     if (building) {
       const zones = await prisma.zone.findMany({
         where: { building_id: buildingId },
@@ -212,9 +233,10 @@ async function listZonesWithLatest(buildingId) {
         orderBy: { id: 'asc' },
       });
 
-      if (zones && zones.length > 0) {
+      if (zones) {
         return {
           building_id: buildingId,
+          source: 'database',
           total: zones.length,
           zones: zones.map((z) => {
             const latest = z.meter_readings && z.meter_readings.length > 0 ? z.meter_readings[0] : null;
@@ -246,11 +268,14 @@ async function listZonesWithLatest(buildingId) {
   const knownBuilding = DEFAULT_BUILDINGS.find((b) => b.id === buildingId);
   if (!knownBuilding) return null;
 
+  const fallbackZones = DEFAULT_ZONES_OFFICE_01.filter((z) => z.building_id === buildingId);
+
   // Graceful in-memory fallback for Zones
   return {
     building_id: buildingId,
-    total: DEFAULT_ZONES_OFFICE_01.length,
-    zones: DEFAULT_ZONES_OFFICE_01.map((z) => ({
+    source: 'demo_fallback',
+    total: fallbackZones.length,
+    zones: fallbackZones.map((z) => ({
       id: z.id,
       building_id: z.building_id,
       floor: z.floor,

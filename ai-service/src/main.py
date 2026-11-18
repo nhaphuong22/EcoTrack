@@ -1,3 +1,5 @@
+import asyncio
+from contextlib import asynccontextmanager
 import hmac
 import os
 import sys
@@ -21,12 +23,24 @@ if str(AI_SERVICE_DIR) not in sys.path:
 
 load_dotenv(AI_SERVICE_DIR / ".env")
 
-from src.api.routers import energy, forecast, anomalies, copilot
+from src.api.routers import energy, forecast, anomalies, copilot, mlops
+from src.mlops.scheduler import start_scheduler, stop_scheduler
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    start_scheduler()
+    try:
+        yield
+    finally:
+        await asyncio.to_thread(stop_scheduler)
+
 
 app = FastAPI(
     title="EcoTrack - Building Energy AI Engine",
     version="1.0.0",
-    description="Dedicated AI & Analytics microservice for building energy forecasting (XGBoost), anomaly detection (Isolation Forest), and conversational AI Copilot."
+    description="Dedicated AI & Analytics microservice for building energy forecasting (XGBoost), anomaly detection (Isolation Forest), and conversational AI Copilot.",
+    lifespan=lifespan,
 )
 
 # CORS configuration
@@ -58,6 +72,7 @@ app.include_router(energy.router)
 app.include_router(forecast.router)
 app.include_router(anomalies.router)
 app.include_router(copilot.router)
+app.include_router(mlops.router)
 
 
 @app.exception_handler(ServingDataError)
@@ -101,6 +116,31 @@ def health(details: bool = False):
     xgb_exists = (models_dir / "xgboost_forecaster.joblib").is_file()
     iso_exists = (models_dir / "isolation_forest.joblib").is_file()
 
+    # Report the real champion status (Story 4.5), feeding Story 2.3 / 4.10. This loads the
+    # champion artifact (no caching) so health agrees with what serving actually does, rather
+    # than reporting a champion the service would 503 on. Best-effort: never raises.
+    champion_status = "unavailable"
+    champion_version = None
+    try:
+        from src.mlops.tracking import champion_health
+
+        _health = champion_health()
+        champion_status = _health["status"]
+        champion_version = _health["version"]
+    except Exception:
+        champion_status = "unavailable"
+        champion_version = None
+
+    # Forecast availability mirrors serving: a resolved champion serves; a broken champion
+    # makes serving 503 (no fallback), so it is NOT "loaded"; otherwise serving falls back to
+    # the on-disk forecaster.
+    if champion_status == "resolved":
+        forecast_status = "loaded"
+    elif champion_status == "broken":
+        forecast_status = "unavailable"
+    else:
+        forecast_status = "loaded" if xgb_exists else "unavailable"
+
     copilot_engine = "rule_based_fallback"
     if os.getenv("GEMINI_API_KEY", "").strip():
         copilot_engine = "google_genai"
@@ -110,8 +150,10 @@ def health(details: bool = False):
     return {
         "status": "healthy",
         "models": {
-            "forecast": "loaded" if xgb_exists else "unavailable",
+            "forecast": forecast_status,
             "anomaly": "loaded" if iso_exists else "unavailable",
+            "champion_version": champion_version,
+            "champion": champion_status,
         },
         "copilot_engine": copilot_engine,
     }

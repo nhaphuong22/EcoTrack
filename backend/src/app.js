@@ -4,7 +4,6 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const errorHandler = require('./middleware/errorHandler');
-const requireAuth = require('./middleware/requireAuth');
 
 const buildingsRouter = require('./routes/buildings');
 const energyRouter = require('./routes/energy');
@@ -13,34 +12,26 @@ const anomaliesRouter = require('./routes/anomalies');
 const copilotRouter = require('./routes/copilot');
 const ingestRouter = require('./routes/ingest');
 const streamRouter = require('./routes/stream');
+const mlopsRouter = require('./routes/mlops');
 const healthRouter = require('./routes/health');
 const authRouter = require('./routes/auth');
-const mlopsRouter = require('./routes/mlops');
+const portalRouter = require('./routes/portal');
+const { requireUser, requireRole } = require('./middleware/requireUser');
 
+function createApp({ authenticate = requireUser } = {}) {
 const app = express();
 
-// Security Headers
 app.use(helmet());
-
-// Configurable CORS
-const defaultOrigins = ['http://localhost:3000', 'http://localhost:5173'];
-const configuredOrigins = process.env.CORS_ORIGINS
-  ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim())
-  : defaultOrigins;
-
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin || configuredOrigins.includes(origin) || process.env.NODE_ENV === 'test') {
-        return callback(null, true);
-      }
-      return callback(new Error('CORS not allowed for this origin.'));
-    },
-    credentials: true,
-  })
-);
-
+const origins = (process.env.FRONTEND_ORIGIN || 'http://localhost:3000,http://127.0.0.1:3000').split(',').map((value) => value.trim());
+app.use(cors({ origin: origins, credentials: true }));
 app.use(express.json());
+app.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.get('Origin') && !origins.includes(req.get('Origin'))) {
+    return res.status(403).json({ detail: 'Origin is not allowed.' });
+  }
+  next();
+});
 
 // Root & Health endpoints (Open)
 app.get('/', (req, res) => {
@@ -54,32 +45,34 @@ app.get('/', (req, res) => {
 
 app.use('/health', healthRouter);
 app.use('/api/v1/health', healthRouter);
-
-// Auth Rate Limiting (protect against brute force credential stuffing)
+// Brute-force protection for sign-in and invitation endpoints.
 const authLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: process.env.NODE_ENV === 'test' ? 1000 : 30, // 30 req/min in prod
+  windowMs: 60 * 1000,
+  max: process.env.NODE_ENV === 'test' ? 1000 : 30,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many requests, please try again later.' },
+  message: { detail: 'Too many requests, please try again later.' },
 });
-
-// Auth Routes (Open, rate-limited)
 app.use('/api/v1/auth', authLimiter, authRouter);
-
-// Ingest Route (Guarded by X-Ingest-Key for IoT sensors)
+app.use('/api/v1/portal', authenticate, portalRouter);
+// Sensor ingestion has a dedicated machine credential. No resident session can
+// access unscoped legacy APIs; operators use the scoped portal as well.
 app.use('/api/v1/ingest', ingestRouter);
+app.use('/api/v1', authenticate, requireRole());
 
-// Domain Routes (require authentication)
-app.use('/api/v1/buildings', requireAuth, buildingsRouter);
-app.use('/api/v1/energy', requireAuth, energyRouter);
-app.use('/api/v1/forecast', requireAuth, forecastRouter);
-app.use('/api/v1/anomalies', requireAuth, anomaliesRouter);
-app.use('/api/v1/copilot', requireAuth, copilotRouter);
-app.use('/api/v1/stream', requireAuth, streamRouter);
-app.use('/api/v1/mlops', requireAuth, mlopsRouter);
+// Mount domain routes under /api/v1
+app.use('/api/v1/buildings', buildingsRouter);
+app.use('/api/v1/energy', energyRouter);
+app.use('/api/v1/forecast', forecastRouter);
+app.use('/api/v1/anomalies', anomaliesRouter);
+app.use('/api/v1/copilot', copilotRouter);
+app.use('/api/v1/stream', streamRouter);
+app.use('/api/v1/mlops', mlopsRouter);
 
 // Global Error Handler
 app.use(errorHandler);
 
-module.exports = app;
+return app;
+}
+module.exports = createApp();
+module.exports.createApp = createApp;

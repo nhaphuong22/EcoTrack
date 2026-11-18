@@ -15,7 +15,7 @@ const mockAnomaly = {
 const mockPrisma = {
   anomalyEvent: {
     findUnique: vi.fn(),
-    update: vi.fn(),
+    updateMany: vi.fn(),
     findMany: vi.fn(),
     upsert: vi.fn(),
   },
@@ -24,7 +24,7 @@ const mockPrisma = {
 global.__mockPrisma = mockPrisma;
 
 import request from 'supertest';
-import app from '../src/app';
+import app from './helpers/adminApp';
 
 describe('Anomaly Lifecycle Endpoints in Express Backend', () => {
   beforeEach(() => {
@@ -34,14 +34,10 @@ describe('Anomaly Lifecycle Endpoints in Express Backend', () => {
 
   describe('PATCH /api/v1/anomalies/:id/status', () => {
     it('should update anomaly status from OPEN to ACKNOWLEDGED', async () => {
-      mockPrisma.anomalyEvent.update.mockResolvedValue({
-        ...mockAnomaly,
-        status: 'ACKNOWLEDGED',
-      });
+      mockPrisma.anomalyEvent.updateMany.mockResolvedValue({ count: 1 });
 
       const res = await request(app)
         .patch('/api/v1/anomalies/ANOM-1234/status')
-        .set(global.authHeaderFor('TECHNICIAN'))
         .send({
           status: 'ACKNOWLEDGED',
           note: 'Operator checking BMS logs.',
@@ -57,7 +53,6 @@ describe('Anomaly Lifecycle Endpoints in Express Backend', () => {
     it('should return 422 for invalid status value', async () => {
       const res = await request(app)
         .patch('/api/v1/anomalies/ANOM-1234/status')
-        .set(global.authHeaderFor('TECHNICIAN'))
         .send({
           status: 'INVALID_STATUS',
         });
@@ -70,7 +65,6 @@ describe('Anomaly Lifecycle Endpoints in Express Backend', () => {
 
       const res = await request(app)
         .patch('/api/v1/anomalies/NON_EXISTENT/status')
-        .set(global.authHeaderFor('TECHNICIAN'))
         .send({
           status: 'RESOLVED',
         });
@@ -82,9 +76,7 @@ describe('Anomaly Lifecycle Endpoints in Express Backend', () => {
 
   describe('GET /api/v1/anomalies/events', () => {
     it('should return list of anomaly events', async () => {
-      const res = await request(app)
-        .get('/api/v1/anomalies/events')
-        .set(global.authHeaderFor('TECHNICIAN'));
+      const res = await request(app).get('/api/v1/anomalies/events');
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
       expect(res.body.length).toBeGreaterThan(0);

@@ -18,8 +18,14 @@ router.get('/readings', (req, res) => {
       res.write(`event: reading\ndata: ${JSON.stringify(reading)}\n\n`);
     }
   };
+  const anomalyListener = (anomaly) => {
+    if (!filterBuildingId || anomaly.building_id === filterBuildingId) {
+      res.write(`event: anomaly\ndata: ${JSON.stringify(anomaly)}\n\n`);
+    }
+  };
 
   readingEmitter.on('reading', listener);
+  readingEmitter.on('anomaly', anomalyListener);
 
   // Send a comment heartbeat every 15s to keep the connection alive
   const heartbeatInterval = setInterval(() => {
@@ -31,6 +37,7 @@ router.get('/readings', (req, res) => {
   req.on('close', () => {
     clearInterval(heartbeatInterval);
     readingEmitter.off('reading', listener);
+    readingEmitter.off('anomaly', anomalyListener);
     res.end();
   });
 });

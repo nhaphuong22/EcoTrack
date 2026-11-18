@@ -4,6 +4,63 @@ stepsCompleted:
   - step-02-design-epics
   - step-03-create-stories
   - step-04-final-validation
+story48Refinement:
+  scope: 4-8-retrain-on-demand-with-guarded-promotion
+  stepsCompleted:
+    - step-01-validate-prerequisites
+    - step-02-design-epics
+    - step-03-create-stories
+    - step-04-final-validation
+  status: completed
+  elicitation:
+    methods: [assumption-audit, failure-mode-analysis, boundary-edge-case-sweep, problem-decomposition, second-order-thinking]
+    status: trimmed-via-party-mode
+    accepted: 2026-11-16
+story49Refinement:
+  scope: 4-9-retrain-automatically-when-the-model-degrades
+  stepsCompleted:
+    - step-01-validate-prerequisites
+    - step-02-design-epics
+    - step-03-create-stories
+    - step-04-final-validation
+  status: completed
+  partyMode:
+    status: accepted-via-party-mode
+    accepted: 2026-11-17
+  inputDocuments:
+    - _bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/prd.md
+    - _bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/addendum.md
+    - _bmad-output/planning-artifacts/architecture/architecture-EcoTrack-2026-09-23/ARCHITECTURE-SPINE.md
+    - _bmad-output/planning-artifacts/epics.md
+story410Refinement:
+  scope: 4-10-report-model-and-drift-status
+  stepsCompleted:
+    - step-01-validate-prerequisites
+    - step-02-design-epics
+    - step-03-create-stories
+    - step-04-final-validation
+  status: completed
+  partyMode:
+    status: accepted-via-party-mode
+    accepted: 2026-11-17
+  inputDocuments:
+    - _bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/prd.md
+    - _bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/addendum.md
+    - _bmad-output/planning-artifacts/architecture/architecture-EcoTrack-2026-09-23/ARCHITECTURE-SPINE.md
+    - _bmad-output/planning-artifacts/epics.md
+story411Refinement:
+  scope: 4-11-expose-model-monitoring-to-admins
+  stepsCompleted:
+    - step-01-validate-prerequisites
+    - step-02-design-epics
+    - step-03-create-stories
+    - step-04-final-validation
+  status: completed
+  inputDocuments:
+    - _bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/prd.md
+    - _bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/addendum.md
+    - _bmad-output/planning-artifacts/architecture/architecture-EcoTrack-2026-09-23/ARCHITECTURE-SPINE.md
+    - _bmad-output/planning-artifacts/epics.md
 inputDocuments:
   - plan.md
   - _bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/prd.md
@@ -12,6 +69,188 @@ inputDocuments:
 ---
 
 # EcoTrack - Epic Breakdown
+
+## Story 4.8 refinement — Requirements extraction (2026-11-16)
+
+Scope and source selection confirmed by the product owner. This scoped pass reuses the existing inventory and epic structure; the original completed workflow above remains historical. Story 4.8 wording and acceptance criteria have been refined and validated.
+
+### Functional requirements in scope
+
+- FR25 (manual portion): accept `POST /internal/mlops/retrain`, train a challenger on the latest data in a background thread, and immediately return HTTP 202 with a run ID.
+- FR25 (promotion guard): evaluate challenger and champion on the same holdout; promote only for strictly lower challenger MAPE. Equal or worse MAPE retains the champion.
+- FR25 (serving): assign the winning model the `champion` alias and serve it without restarting, as already required by Story 4.8.
+- FR25 (history): record timestamp, trigger `manual`, both MAPE values, and outcome `promoted` or `rejected` for completed evaluations.
+- FR25 (concurrency): return HTTP 409 when retraining is already running.
+- PRD FR-3 constraint: preserve chronological training/evaluation boundaries and prevent temporal leakage.
+- FR23 dependency: reuse the MLflow tracking and registered champion introduced in Story 4.5.
+- FR17 dependency: retain internal-token protection on the new internal endpoint.
+
+### Applicable non-functional requirements
+
+- NFR3: preserve the existing forecast latency target (p95 below 300 ms); do not interpret it as a training completion deadline.
+- NFR5: training and serving run on CPU.
+- NFR6 / AD-2: CPU-intensive work must not block the FastAPI event loop.
+- NFR7 / AD-5: API timestamps use ISO 8601 UTC.
+- NFR8: provide scope-specific pytest coverage and pass CI before merge.
+- PRD NFR-3: retain estimator-compatible model interfaces.
+
+### Architecture and scope boundaries
+
+- Extend the brownfield `ai-service/`; keep training/evaluation callable without FastAPI (AD-1). The older spine's ML paths under `backend/` map to `ai-service/` per the existing inventory.
+- Reuse serving features and artifacts; do not introduce a second training or inference stack.
+- Reconcile the source conflict explicitly: `plan.md` calls hot reload stretch work, while the existing Story 4.8 explicitly requires it. This refinement retains the story requirement pending requirements confirmation.
+- Scheduled/drift-triggered execution stays in Story 4.9; the status endpoint in 4.10; gateway proxy in 4.11; UI in 4.12; role gates in Epic 5.
+- No standalone UX contract was discovered. This story introduces an internal API and no UI work.
+- No starter template or database migration is prescribed by the selected sources for this story.
+
+### Clarifications proposed for acceptance-criteria drafting
+
+These are proposed safeguards, not requirements already specified by the sources:
+
+- Define one reproducible holdout snapshot excluded from challenger training, with identical scoring rules and a documented zero-target policy for MAPE.
+- On invalid or insufficient data, training/evaluation failure, or non-finite scores, retain the champion, record an explicit failure reason, and release the retrain lock.
+- If registry promotion or model reload fails, preserve a consistent usable champion and make the failed attempt traceable.
+- Define the run lifecycle and history fields for failures, including unavailable metrics, without conflating operational failure with a completed evaluation rejection.
+
+Requirements, including the proposed safeguards above, were confirmed by the product owner with `C` on 2026-11-16 and applied to Story 4.8 below.
+
+### Proposed epic placement and coverage
+
+- Retain Story 4.8 in the existing Epic 4 (model lifecycle); introduce no additional epic for this scoped refinement.
+- User outcome: an administrator can request a model refresh while the service retains its champion unless a challenger demonstrates lower MAPE on the shared holdout. This is a measured holdout guarantee, not a guarantee about all future forecasts.
+- FR25 manual retraining, promotion guard, concurrency, history, and confirmed failure safeguards map to Epic 4 / Story 4.8.
+- PRD FR-3 temporal separation constrains Story 4.8 evaluation; existing FR23 model tracking/registry (Story 4.5) and FR17 internal-token enforcement (Story 1.6) are prerequisites.
+- Story 4.8 must function through its internal endpoint without requiring later scheduling (4.9), status API (4.10), gateway (4.11), UI (4.12), or Epic 5 role gates. Persist history here for later status consumption.
+- Reuse the existing training, tracking, and serving modules within this epic. Their shared ownership supports retaining one model-lifecycle epic rather than splitting training, HTTP, and model loading into separate epics.
+
+Epic placement approved by the product owner on 2026-11-16; the global epic list and FR coverage map remain unchanged.
+
+### Accepted refinements after Party Mode review (2026-11-16)
+
+Following Advanced Elicitation and Party Mode review, the product owner approved trimming the 5 elicitation blocks down to 3 practical guardrails for Story 4.8 acceptance-criteria drafting (dropping multi-replica coordination and process-restart crash-recovery machinery):
+
+1. **Fair Holdout (No Temporal Leakage):** Evaluate both `champion` and `challenger` on a shared chronological holdout window strictly after the training cutoff of both models, using an identical MAPE rule with documented handling for zero targets (`y == 0`) and rejecting non-finite (`NaN`/`Inf`) scores. Promote only when `challenger_mape < champion_mape`.
+2. **Safe Hot-Reload:** Verify that the challenger artifact loads cleanly before updating the MLflow `champion` alias under `.champion.lock` and calling `reset_serving_cache()` in `serving_frame.py`. If promotion or reload fails, preserve the existing usable champion.
+3. **Three-State History & Lock Safety (`promoted` | `rejected` | `failed`):** Use an atomic in-process lock to return HTTP 409 on concurrent requests, always release the lock in a `finally` block across every terminal path, and persist history records (`run_id`, `timestamp`, `trigger`, `champion_mape`, `challenger_mape`, `outcome`, and optional `reason`) via a reusable retrain coordinator in `ai-service/src/mlops/` that Story 4.9 and Story 4.10 can consume.
+
+## Story 4.9 refinement — Requirements extraction (2026-11-17)
+
+Scope and source selection confirmed by the product owner (explicitly excluding `plan.md`). This scoped pass reuses the existing inventory and epic structure; Story 4.9 wording and acceptance criteria have been refined and validated.
+
+### Functional requirements in scope
+
+- FR25 (automatic / scheduled portion) & PRD FR-5: run a scheduled daily job that calls the Story 4.6 drift check (`drift.check()`) and triggers retraining (`run_retrain()`) only when `drift_detected` is `true`.
+- FR25 (trigger & signal attribution): classify automatic retrain `trigger` as `"mape"` when only `"rolling_mape"` triggered, or `"drift"` when `"meter_reading"` or `"air_temperature"` triggered (including when accompanied by `"rolling_mape"`), and persist the full `triggered_signals` list in `signals` on the `retrain_history.json` record.
+- FR25 (configuration & testability): allow disabling the background scheduler via configuration (defaulting to disabled in tests) and expose the daily job function as plain Python directly callable in `pytest`.
+- FR24 dependency (Story 4.6): reuse `ai-service/src/mlops/drift.py` (`drift.check()`) and its configured thresholds.
+- FR25 dependency (Story 4.8): reuse `ai-service/src/mlops/retrain.py` (`run_retrain()`) and its guarded holdout promotion / `_retrain_lock` (`RetrainAlreadyRunningError` handled safely by logging and skipping without crashing the scheduler).
+- FR26 downstream readiness (Story 4.10): persist the latest drift check snapshot (`drift_status.json` in `get_models_dir()` with `checked_at` in ISO 8601 UTC) after every job execution (even when `drift_detected` is `false`).
+
+### Applicable non-functional requirements
+
+- NFR5: drift checking and retraining execute on CPU.
+- NFR6 / AD-2: scheduled background checks and retraining must not block the FastAPI event loop.
+- NFR7 / AD-5: all persisted timestamps (`checked_at`, history entries) use ISO 8601 UTC (`Z`).
+- NFR8: provide offline `pytest` coverage without starting FastAPI or running heavy BDG2 training jobs.
+
+### Architecture and scope boundaries
+
+- AD-1 (hexagonal boundary): keep the check/retrain decision logic and scheduler helper as plain Python under `ai-service/src/mlops/`; wire only startup/shutdown lifecycle hooks in `ai-service/src/main.py`.
+- Dependency boundary (`plan.md` excluded): no APScheduler dependency is mandated by the remaining sources; implement the daily scheduler using Python stdlib (`threading.Event` + daemon `threading.Thread` with configurable interval) without adding external packages.
+- Default window resolution: construct `reference_df` (first 80% chronological split) and `recent_df` (trailing 168 hours) from `get_data_path()`, while allowing callers/tests to inject `reference_df` / `recent_df` directly.
+- Out of scope: `GET /internal/mlops/status` (Story 4.10), gateway proxy (Story 4.11), UI (Story 4.12), RBAC (Epic 5).
+
+### Proposed epic placement and coverage
+
+- Retain **Story 4.9** within existing **Epic 4: Self-Monitoring Model Lifecycle**; do not split scheduler wiring and drift-check orchestration into separate epics or stories.
+- User outcome: an admin can rely on daily automated drift monitoring that refreshes the model only when degradation is detected and still enforces Story 4.8's guarded promotion rules.
+- FR coverage mapping: **FR25 (automatic retraining)** and **PRD FR-5** map to **Epic 4 / Story 4.9**, building on **FR24 (Story 4.6)** and **FR25 manual coordinator (Story 4.8)** while supplying `drift_status.json` and triggered history entries for **FR26 (Story 4.10)**.
+- Independence: fully functional via Python module and FastAPI lifecycle without requiring Stories 4.10–4.12 or Epic 5.
+
+Epic placement approved by the product owner on 2026-11-17; the global epic list and FR coverage map remain unchanged.
+
+### Accepted refinements after Party Mode review (2026-11-17)
+
+1. **Stdlib Daily Scheduler (No APScheduler):** With `plan.md` excluded, run the daily drift check using Python stdlib (`threading.Event` + daemon `threading.Thread`) managed via FastAPI `lifespan` (`stop_event.set()` + bounded `join()` on shutdown) in `ai-service/src/main.py`, with a configurable interval (default `86400`s / 24h) and a short configurable initial delay (`ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS`, default `10`s so startup health checks complete before the first check populates `drift_status.json`). `ECOTRACK_SCHEDULER_ENABLED` defaults to enabled at runtime (matching `docker-compose.yml` out of the box) and is disabled via configuration in `ai-service/tests/conftest.py`. Errors during any scheduled tick are logged and do not terminate the scheduler loop or FastAPI process.
+2. **Recent-Window Resolution & Test Injection:** Resolve `reference_df` as the chronological first 80% of `get_data_path()` and `recent_df` from optional `ECOTRACK_DRIFT_RECENT_PATH` (falling back to the unmodified baseline dataset at `get_data_path()`, whose trailing 168h are scored for rolling MAPE), while letting the plain-Python job accept `reference_df` / `recent_df` directly in tests without adding a cooldown/dedup layer not requested by FR25. If a drifted demo scenario causes `run_retrain()` to reject an inferior/unchanged challenger, preserving the champion as `rejected` is the intended guarded-promotion behavior.
+3. **Observability & Trigger Rules:** Persist `get_models_dir() / "drift_status.json"` on every scheduled check with `checked_at` (ISO 8601 UTC), `drift_detected`, `triggered_signals`, `signals`, `rolling_mape`, `thresholds`, `retrain_triggered`, and optional `retrain_run_id` for Story 4.10/4.12. Classify automatic retrain `trigger` as `"mape"` when only `"rolling_mape"` triggered, else `"drift"`, passing `signals=triggered_signals` into `run_retrain(...)`, and log-and-skip safely on `RetrainAlreadyRunningError`.
+
+## Story 4.10 refinement — Requirements extraction (2026-11-17)
+
+Scope and source selection confirmed by the product owner (excluding missing `plan.md`). This scoped pass reuses the existing inventory and epic structure; Story 4.10 requirements have been extracted and validated for downstream epic/story refinement.
+
+### Functional requirements in scope
+
+- **FR26 (`GET /internal/mlops/status`):** Return a single consolidated health summary for monitoring consumers without exposing MLflow internals:
+  - Champion model summary: version, training date (ISO 8601 UTC), and evaluation metrics (`rmse_kwh`, `mae_kwh`, `mape_percent`, `r2_score`) from the active MLflow `champion` run or `models_saved/` fallback when MLflow is disabled/uninitialized.
+  - Latest drift status: snapshot from `get_models_dir() / "drift_status.json"` (Story 4.9 / Story 4.6), or `null` when no drift check has run yet while still responding HTTP 200.
+  - Anomaly detector quality metrics: `isolation_forest_quality` from `get_models_dir() / "model_metadata.json"` (Story 4.7), or `null` when absent.
+  - Retraining history (newest first): entries from `get_models_dir() / "retrain_history.json"` (Stories 4.8–4.9), returning `[]` when empty/absent.
+  - Forecast benchmark table: parsed payload from `experiments/benchmark/results.json` (Story 4.4) when present, or `null` when absent.
+- **FR17 dependency (Story 1.6):** Enforce `X-Internal-Token` authentication on `GET /internal/mlops/status` via the existing `/internal/*` middleware (`401 ERR_UNAUTHORIZED` when missing/invalid).
+- **Downstream consumers (out of scope here):** Story 4.11 (`FR40` gateway proxy `/api/v1/mlops/status`) and Story 4.12 (`FR44` frontend MLOps monitoring page).
+
+### Applicable non-functional requirements
+
+- **NFR5:** Execute on CPU with no new external dependencies or GPU requirements.
+- **NFR6 / AD-2:** Handle `GET /internal/mlops/status` via an `async def` FastAPI route running blocking disk/MLflow reads in `asyncio.to_thread` so the event loop is not starved.
+- **NFR7 / AD-5:** Emit all API timestamps in ISO 8601 UTC (`Z`) and all numeric metrics as finite JSON floats (no `NaN`/`Inf`).
+- **NFR8:** Ship offline `pytest` coverage in `ai-service/tests/` exercising present/missing artifacts, newest-first retrain history, MLflow disabled/uninitialized vs broken champion states, and `X-Internal-Token` enforcement.
+
+### Architecture and scope boundaries
+
+- **AD-1 (hexagonal boundary):** Implement status aggregation as plain Python under `ai-service/src/mlops/` callable directly without FastAPI; keep `ai-service/src/api/routers/mlops.py` as a thin HTTP adapter.
+- **Brownfield artifact sources:** Read only from existing configured locations (`ai-service/src/mlops/tracking.py`, `get_models_dir() / "model_metadata.json"`, `get_models_dir() / "drift_status.json"`, `get_models_dir() / "retrain_history.json"`, and `ai-service/experiments/benchmark/results.json` with configurable path override for tests); no new DB drivers or migrations.
+- **No UX design contract:** No standalone UX documents exist; UI rendering belongs to Story 4.12 (`FR44`).
+
+### Confirmed clarifications for Story 4.10 drafting
+
+- **HTTP 200 resilience vs broken champion visibility:** Keep `GET /internal/mlops/status` returning HTTP 200 even when MLflow is disabled/uninitialized (local fallback) or when the resolved `champion` artifact/SQLite store is broken/locked (surfaced explicitly in the champion health/status fields rather than crashing the monitoring endpoint).
+- **Champion training timestamp fallback:** Read run timestamp from MLflow when available; on local fallback, derive `trained_at` from `train_end_timestamp` in `model_metadata.json` or the artifact `mtime` in ISO 8601 UTC.
+- **Optional benchmark path & missing anomaly quality:** Allow overriding the benchmark `results.json` path for clean offline testing, and return `null` cleanly when `results.json` or `isolation_forest_quality` is absent.
+
+Requirements confirmed by the product owner (`C`) on 2026-11-17.
+
+### Proposed epic placement and coverage
+
+- Retain **Story 4.10** within existing **Epic 4: Self-Monitoring Model Lifecycle**; do not create a new epic or split plain-Python status aggregation from the `/internal/mlops/status` FastAPI router.
+- User outcome: an admin and downstream monitoring consumers (`4.11` gateway, `4.12` UI) get a single consolidated health summary (`champion`, `drift`, `anomaly_quality`, `retrain_history`, `benchmark`) without coupling to MLflow internals or scattered JSON artifacts.
+- FR coverage mapping: **FR26 (`GET /internal/mlops/status`)** maps to **Epic 4 / Story 4.10**, building on **FR17 (Story 1.6)**, **FR21 (Story 4.4)**, **FR23 (Story 4.5)**, **FR24 (Story 4.6)**, **FR27 (Story 4.7)**, and **FR25 (Stories 4.8–4.9)**.
+- Independence: fully functional via plain-Python module and FastAPI internal endpoint (responding HTTP 200 with `null`/`[]` when optional upstream artifacts are absent) without requiring Stories 4.11–4.12 or Epic 5.
+
+Epic placement approved by the product owner on 2026-11-17; the global epic list and FR coverage map remain unchanged.
+
+### Accepted refinements after Party Mode review (2026-11-17)
+
+1. **Lightweight Champion Inspection & Explicit Broken-State Visibility:** Read champion `version`, `trained_at`, and `metrics` via `MlflowClient` metadata (`get_model_version_by_alias` + `get_run`) without deserializing the XGBoost model on every status call. When MLflow is disabled, uninitialized, or has no `champion` alias, fall back to `models_saved/` (`source: "local"`, `status: "fallback"`, or `status: "unavailable"` if no local model exists). When an MLflow `champion` alias exists but SQLite is locked or its artifact is missing/corrupt, **never** fall back silently to `models_saved/` — return HTTP 200 with `champion.status = "broken"`, `metrics: null`, and a diagnostic `error` so downstream UI can alert without blanking other sections.
+2. **Honest `trained_at` Timestamp (ISO 8601 UTC, NFR7):** Derive `trained_at` from the MLflow run timestamp (`end_time` / `start_time` / `creation_timestamp`) formatted in ISO 8601 UTC (`Z`). On `local` fallback, read `train_end_timestamp` from `model_metadata.json` when present and return `null` when absent rather than fabricating a training date from file `mtime` (which reflects container build/copy time).
+3. **Verbatim Benchmark Payload (~16 KB):** Return the parsed `experiments/benchmark/results.json` object verbatim when present (or `null` when absent), avoiding unnecessary projection layers while supporting an optional path/env override (`ECOTRACK_BENCHMARK_RESULTS_PATH` / function parameter) for offline tests.
+4. **Per-Section Disk Error Isolation & Safe Serialization:** Missing artifact files return `null` (`drift`, `anomaly_quality`, `benchmark`) or `[]` (`retrain_history`). If a persisted JSON file exists on disk but is corrupt/invalid, preserve fail-loud behavior in `load_drift_status()` / `load_retrain_history()` for scheduler/retrain callers while catching and logging the read error in the status aggregator, returning `null`/`[]` for that section alongside a per-section entry in `errors` while still keeping HTTP 200. Sort `retrain_history` stably by `timestamp` descending (newest first) and sanitize/reject non-finite floats (`NaN`/`Inf`) so JSON serialization never fails.
+
+## Story 4.11 refinement — Requirements extraction (2026-11-17)
+
+Scoped pass for Story 4.11; reuses the existing inventory and epic structure. No UX contract applies (gateway only).
+
+### Functional requirements in scope
+
+- **FR40:** The gateway proxies `GET /api/v1/mlops/status` → `GET /internal/mlops/status` (Story 4.10) and `POST /api/v1/mlops/retrain` → `POST /internal/mlops/retrain` (Story 4.8). The `ADMIN`-only gate on retrain is Epic 5 (Story 5.3), not this story.
+- Gateway uses the existing `callAIService` client (injects `X-Internal-Token`, 30 s timeout; unreachable → 502, timeout → 504).
+- Out of scope: UI (Story 4.12), RBAC (Epic 5).
+
+### Confirmed clarifications
+
+- **409/202 pass-through:** `POST /api/v1/mlops/retrain` forwards the AI service's 202 and 409 status and body verbatim (including `run_id`), so Story 4.12 can show "running". Only true failures (502 unreachable, 504 timeout) use the standard error envelope.
+- **Status passthrough:** Status payload is forwarded unchanged; `champion.status` of `broken`/`unavailable` still returns HTTP 200.
+- **Placement:** Keep Story 4.11 as-is within Epic 4; add ACs for 409 body pass-through, 504 timeout and non-error champion states. No new story.
+
+Requirements confirmed by the product owner (`C`) on 2026-11-17.
+
+### Epic placement and Party Mode refinements (2026-11-17)
+
+- Story 4.11 stays in **Epic 4**; FR40 coverage map unchanged.
+- Only upstream 202 and 409 are forwarded verbatim (status and body). Any other upstream 4xx/5xx becomes a 502 standard envelope with `upstream_status` and a fixed per-status `message`; the upstream body is logged server-side only. Timeout stays 504.
+- `POST /retrain` never forwards the client body.
+- `GET /status` gets a short in-memory cache (proposed TTL 5 s), cleared after a retrain call. `POST /retrain` has its own rate limit returning 429 (proposed 3/min). Both values come from env vars; reuse existing backend facilities, no new dependency unless none exists.
 
 ## Overview
 
@@ -789,17 +1028,23 @@ So that I can trace which run produced the model in production.
 **When** the best parameters are applied
 **Then** the benchmark is re-run with them and the tuned and untuned rows can be compared for both models
 
-**Given** MLflow configured with a local SQLite backend
+**Given** MLflow configured with a local SQLite backend stored at a repo-relative path (`ai-service/mlruns/mlflow.db` with its artifact store under `ai-service/mlruns/`), mounted into the AI service container through a Docker volume so the same store is visible to the owner's training runs and to the container at runtime
 **When** `train_models.py` runs
 **Then** the run logs hyperparameters, RMSE, MAE, MAPE, R², the feature list, the data row counts and the model artifacts
+**And** the tracking URI and artifact root are read from configuration as relative paths, never as an absolute machine-specific path
 
 **Given** a completed training run
 **When** it is registered
 **Then** the model version receives the `champion` alias only if no champion exists yet
+**And** registering the first champion is idempotent and guarded against a concurrent run claiming the alias at the same time; promoting a better model over an existing champion is out of scope here and belongs to Story 4.8
 
-**Given** the AI service starts
+**Given** the AI service starts and MLflow is not initialised (no tracking store or no `champion` alias)
 **When** it loads the forecast model
-**Then** it loads the version behind the `champion` alias, and falls back to `models_saved/` with a logged warning if MLflow is not initialised
+**Then** it falls back to `models_saved/` with a logged warning and serves normally
+
+**Given** the AI service starts and the `champion` alias resolves, but its artifact is missing or corrupt or the SQLite backend is locked
+**When** it loads the forecast model
+**Then** it does not silently fall back; it surfaces the same explicit `503` `ERR_MODEL_NOT_FOUND` error used in Epic 1 Story 1.5, naming the champion version it failed to load
 
 ### Story 4.6: Detect data drift and accuracy decay
 
@@ -844,51 +1089,72 @@ So that I can state how reliable its alerts are.
 ### Story 4.8: Retrain on demand with guarded promotion
 
 As an admin,
-I want to trigger retraining and have the new model replace the old one only if it is better,
-So that a retrain can never make forecasts worse.
+I want to trigger retraining and have the new model replace the old one only if it beats the current champion on an unbiased holdout set,
+So that a manual retrain refreshes the model safely and never degrades production forecasts.
 
-**Implements:** FR25
+**Implements:** FR25, NFR3, NFR5, NFR6, NFR7, NFR8 (builds on FR17, FR23, PRD FR-3, AD-1)
 
 **Acceptance Criteria:**
 
-**Given** a champion model
-**When** `POST /internal/mlops/retrain` is called
-**Then** a challenger is trained on the latest data in a background thread, and the endpoint returns 202 with a run id immediately
+**Given** a registered `champion` forecaster and valid `X-Internal-Token` authentication
+**When** `POST /internal/mlops/retrain` is called while no retrain job is active
+**Then** the service atomically acquires an in-process retrain lock, starts the plain-Python retrain coordinator (`ai-service/src/mlops/`) in a background thread without blocking the FastAPI event loop, and immediately returns HTTP 202 with `run_id`, `status: "running"`, and `started_at` in ISO 8601 UTC
 
-**Given** the challenger and the champion are scored on the same holdout set
-**When** the challenger's MAPE is lower
-**Then** it receives the `champion` alias and the service serves it without a restart
-**And** when it is not lower, the champion is kept
+**Given** a retrain job is already running
+**When** `POST /internal/mlops/retrain` is called again
+**Then** the endpoint immediately responds with HTTP 409 Conflict and does not start a second run
 
-**Given** any retrain attempt
-**When** it finishes
-**Then** a history record stores the timestamp, the trigger (`manual`), both MAPE values and the outcome (`promoted` or `rejected`)
+**Given** a retrain run executing on the latest dataset
+**When** the challenger is trained and compared against the current champion
+**Then** both models are evaluated on the same chronological holdout window positioned strictly after the training cutoff of both models (preventing temporal leakage)
+**And** both models are scored with an identical MAPE calculation that excludes zero-target (`y == 0`) rows and rejects non-finite (`NaN` or `Inf`) scores
 
-**Given** a retrain is already running
-**When** the endpoint is called again
-**Then** it responds 409
+**Given** both holdout MAPE scores are finite
+**When** `challenger_mape < champion_mape` (strictly lower)
+**Then** the coordinator verifies that the challenger artifact loads and produces a valid prediction before updating the MLflow `champion` alias under `.champion.lock` and calling `reset_serving_cache()` so the service serves the new champion without a restart
+**And** when `challenger_mape >= champion_mape`, the existing `champion` alias and in-memory serving model are kept unchanged with outcome `rejected`
+
+**Given** invalid or insufficient data, a missing/uncomparable champion, a non-finite MAPE score, or an error during training, alias promotion, or model reload
+**When** the retrain attempt aborts
+**Then** the existing usable `champion` remains active in serving, the run is recorded with outcome `failed` and a clear `reason`, and no broken model replaces the champion
+
+**Given** any retrain attempt (`promoted`, `rejected`, or `failed`)
+**When** the run reaches a terminal state
+**Then** the in-process retrain lock is always released in a `finally` block so future retrain requests are not blocked
+**And** a persisted history record stores `run_id`, `timestamp` (ISO 8601 UTC), `trigger` (`"manual"`), `champion_version`, `challenger_version`, `champion_mape`, `challenger_mape`, `outcome` (`"promoted"` | `"rejected"` | `"failed"`), and `reason` for Story 4.9 and Story 4.10 to reuse
 
 ### Story 4.9: Retrain automatically when the model degrades
 
 As an admin,
-I want the system to check for drift every day and retrain when needed,
-So that the model stays accurate without someone watching it.
+I want the system to check for drift every day and automatically trigger guarded retraining when the model degrades,
+So that forecast quality stays reliable without manual monitoring.
 
-**Implements:** FR25
+**Implements:** FR25, PRD FR-5, NFR5, NFR6, NFR7, NFR8 (builds on FR24, Story 4.6, Story 4.8, AD-1)
 
 **Acceptance Criteria:**
 
-**Given** the AI service is running with the scheduler enabled
-**When** the daily job fires
-**Then** it runs the drift check from Story 4.6 and starts a retrain only if `drift_detected` is true
+**Given** the AI service runs with `ECOTRACK_SCHEDULER_ENABLED` enabled (default at runtime)
+**When** the FastAPI application starts and enters its lifespan
+**Then** a stdlib background scheduler (`threading.Event` + daemon `threading.Thread`, without external scheduler packages) waits `ECOTRACK_SCHEDULER_INITIAL_DELAY_SECONDS` (default `10`s) before executing the first check and repeats every `ECOTRACK_SCHEDULER_INTERVAL_SECONDS` (default `86400`s) without blocking the FastAPI event loop
+**And** on application shutdown, the scheduler sets its stop event and performs a bounded thread join so no background thread leaks
 
-**Given** an automatic retrain
-**When** it is recorded
-**Then** the history entry has the trigger `drift` or `mape` and the signals that caused it
+**Given** the plain-Python daily check function in `ai-service/src/mlops/`
+**When** it runs (using `reference_df` from the first 80% of `get_data_path()` and `recent_df` from `ECOTRACK_DRIFT_RECENT_PATH` or the unmodified baseline dataset at `get_data_path()`, or caller-supplied `reference_df`/`recent_df` frames in tests)
+**Then** it executes Story 4.6's `drift.check(...)` and persists the latest snapshot (`checked_at` in ISO 8601 UTC, `drift_detected`, `triggered_signals`, `signals`, `rolling_mape`, `thresholds`, `retrain_triggered`, and `retrain_run_id`) atomically to `get_models_dir() / "drift_status.json"`
+**And** when `drift_detected` is `false`, it does not call `run_retrain(...)` and writes nothing to `retrain_history.json`
 
-**Given** the test environment
-**When** the service starts
-**Then** the scheduler is disabled through configuration, and the job function can be called directly in tests
+**Given** `drift.check(...)` returns `drift_detected: true`
+**When** the daily check triggers Story 4.8's `run_retrain(...)`
+**Then** `trigger` is set to `"mape"` when `triggered_signals == ["rolling_mape"]`, and `"drift"` when any distribution signal (`"meter_reading"` or `"air_temperature"`) triggered (even if accompanied by `"rolling_mape"`)
+**And** the full `triggered_signals` list is passed as `signals` and persisted in `retrain_history.json`, while Story 4.8's guarded promotion (`challenger_mape < champion_mape`) determines whether the challenger becomes `champion`
+
+**Given** a manual or prior retrain already holds `_retrain_lock` (`RetrainAlreadyRunningError`), or an unexpected error occurs during a scheduled check tick
+**When** the scheduled job runs
+**Then** it logs the condition/error cleanly without crashing the scheduler loop or FastAPI process, preserving subsequent scheduled ticks
+
+**Given** the test environment (`ai-service/tests/conftest.py`) or `ECOTRACK_SCHEDULER_ENABLED` set to a falsy value
+**When** the FastAPI app starts
+**Then** the background scheduler does not start, and the plain-Python daily check job remains directly importable and runnable in `pytest` without FastAPI
 
 ### Story 4.10: Report model and drift status
 
@@ -896,21 +1162,34 @@ As an admin,
 I want one endpoint that summarises the model's health,
 So that the monitoring page can show it without knowing MLflow internals.
 
-**Implements:** FR26
+**Implements:** FR26, NFR5, NFR6, NFR7, NFR8 (builds on FR17, FR21, FR23, FR24, FR25, FR27, AD-1, AD-2, AD-5)
 
 **Acceptance Criteria:**
 
-**Given** a champion model and at least one drift check
-**When** a client calls `GET /internal/mlops/status`
-**Then** the response contains the champion's version, training date and metrics; the latest drift result; the anomaly detector's quality metrics; and the retraining history, newest first
+**Given** a valid `X-Internal-Token` header, an active MLflow `champion` model, and persisted `drift_status.json`, `model_metadata.json` (with `isolation_forest_quality`), `retrain_history.json`, and `experiments/benchmark/results.json`
+**When** a client calls `GET /internal/mlops/status` (or calls the plain-Python status aggregator under `ai-service/src/mlops/` directly without FastAPI per AD-1)
+**Then** the FastAPI route runs the blocking status collection via `asyncio.to_thread` without blocking the event loop and returns HTTP 200 with: `champion` (`status: "resolved"`, `source: "mlflow"`, `version`, `trained_at` in ISO 8601 UTC from the MLflow run, and `metrics`), `drift` (latest snapshot from `drift_status.json`), `anomaly_quality` (`isolation_forest_quality` from `model_metadata.json`), `retrain_history` (entries ordered newest first by `timestamp`), `benchmark` (the parsed `results.json` payload), and `errors` (`{}` when all present sources load cleanly)
+**And** requests without a valid `X-Internal-Token` are rejected with HTTP 401 `ERR_UNAUTHORIZED`
 
-**Given** the benchmark `results.json` exists
+**Given** MLflow is disabled (`ECOTRACK_DISABLE_MLFLOW`), uninitialized, or has no `champion` alias set
 **When** status is requested
-**Then** the benchmark table is included, and the field is `null` when the file is absent
+**Then** the aggregator inspects metadata lightly without deserializing the XGBoost binary and falls back to `get_models_dir()`: when `xgboost_forecaster.joblib` is present on disk, `champion` reports `source: "local"`, `status: "fallback"`, `version: "local"`, `metrics` from `model_metadata.json` (`xgboost_metrics` when present), and `trained_at` from `train_end_timestamp` in ISO 8601 UTC (`null` when absent, never fabricated from file `mtime`); when `xgboost_forecaster.joblib` is absent, `champion` reports `status: "unavailable"`, `version: null`, `trained_at: null`, `metrics: null`, and the endpoint still responds HTTP 200
 
-**Given** no drift check has run yet
+**Given** an MLflow `champion` alias resolves but the SQLite registry fails (e.g., locked) or the champion artifact is missing/unreadable
 **When** status is requested
-**Then** the drift field is `null` and the endpoint still responds 200
+**Then** the service never falls back silently to `models_saved/` metrics; it returns HTTP 200 with `champion` reporting `status: "broken"`, `source: "mlflow"`, `metrics: null`, and a diagnostic `error` message while still returning `drift`, `anomaly_quality`, `retrain_history`, and `benchmark`
+
+**Given** no drift check has run yet (`drift_status.json` absent), `isolation_forest_quality` or `model_metadata.json` is absent, no retrain history exists (`retrain_history.json` absent), or `results.json` is absent
+**When** status is requested (with configurable benchmark path override for tests)
+**Then** the endpoint still responds HTTP 200 with `drift: null`, `anomaly_quality: null`, `retrain_history: []`, and `benchmark: null` respectively
+
+**Given** a persisted JSON artifact (`drift_status.json`, `retrain_history.json`, `model_metadata.json`, or `results.json`) exists on disk with corrupt/invalid JSON or non-finite numbers (`NaN`/`Inf`), or `retrain_history.json` entries are out of timestamp order
+**When** the status aggregator runs
+**Then** existing fail-loud behavior in `load_drift_status()` and `load_retrain_history()` remains unchanged for scheduler and retrain callers, while the status aggregator logs the error, isolates the failure by returning `null` (or `[]` for `retrain_history`) for the affected section with a per-section diagnostic entry in `errors`, still responds HTTP 200, keeps `retrain_history` stably sorted newest-first by `timestamp`, and rejects/sanitizes non-finite floats so JSON serialization never fails
+
+**Given** the `ai-service` pytest suite
+**When** the Story 4.10 offline tests run (without executing model training or starting a live server)
+**Then** tests cover the plain-Python aggregator and `GET /internal/mlops/status` across present/absent artifacts, lightweight MLflow metadata lookup, local fallback (`trained_at: null` when `train_end_timestamp` is missing), broken MLflow champion non-fallback visibility, corrupt-JSON isolation in `errors`, newest-first `retrain_history` sorting, `asyncio.to_thread` execution, and `X-Internal-Token` 401 enforcement
 
 ### Story 4.11: Expose model monitoring to admins
 
@@ -918,21 +1197,44 @@ As an admin,
 I want model status and retraining available through the gateway,
 So that the monitoring page uses the same protected API as everything else.
 
-**Implements:** FR40
+**Implements:** FR40 (builds on FR25 via Story 4.8, FR26 via Story 4.10)
 
 **Acceptance Criteria:**
 
 **Given** a client (the `ADMIN`/`MANAGER` role gate is added in Epic 5, Story 5.3)
 **When** it calls `GET /api/v1/mlops/status`
-**Then** the gateway returns the AI service's status payload
+**Then** the gateway calls `GET /internal/mlops/status` via `callAIService` and returns the payload unchanged
+**And** a `champion.status` of `"fallback"`, `"unavailable"` or `"broken"` is still returned as HTTP 200, never converted into an error
+
+**Given** a status response was served within the cache TTL (`MLOPS_STATUS_CACHE_TTL_SECONDS`, default 5)
+**When** `GET /api/v1/mlops/status` is called again
+**Then** the cached payload is returned without calling the AI service
+**And** the cache is cleared after any `POST /api/v1/mlops/retrain` call so the next status reflects the new run
 
 **Given** a client
 **When** it calls `POST /api/v1/mlops/retrain`
-**Then** the gateway forwards it and returns the AI service's 202 or 409 response
+**Then** the gateway forwards `POST /internal/mlops/retrain` with no request body and returns the AI service's 202 or 409 status and body verbatim (including `run_id`)
+
+**Given** a client exceeds the retrain rate limit (`MLOPS_RETRAIN_RATE_LIMIT_PER_MINUTE`, default 3)
+**When** it calls `POST /api/v1/mlops/retrain` again
+**Then** the gateway responds 429 with the standard error envelope without calling the AI service
 
 **Given** the AI service is unreachable
 **When** either endpoint is called
 **Then** the gateway responds 502 with the standard error envelope
+
+**Given** the AI service does not answer within the client timeout
+**When** either endpoint is called
+**Then** the gateway responds 504 with the standard error envelope
+
+**Given** the AI service responds with any other non-2xx status (for example 401 from a token mismatch or 500)
+**When** either endpoint is called
+**Then** the gateway responds 502 with the standard error envelope containing `upstream_status` and a fixed per-status `message`
+**And** the upstream response body is logged server-side only and never returned to the client
+
+**Given** the gateway test suite
+**When** the Story 4.11 tests run with the AI service mocked
+**Then** they cover status pass-through (including `broken`), cache hit and cache clear after retrain, 202 and 409 verbatim forwarding, retrain sent without a body, 429 rate limit, 502 unreachable, 504 timeout, and upstream 401/500 mapped to 502 without leaking the body
 
 ### Story 4.12: Monitor the model as an admin
 

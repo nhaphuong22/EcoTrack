@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
-import app from '../src/app';
+import app from './helpers/adminApp';
 
 describe('Story 3.5: Copilot SSE Streaming Relay', () => {
   const originalFetch = global.fetch;
@@ -47,7 +47,6 @@ describe('Story 3.5: Copilot SSE Streaming Relay', () => {
 
     const res = await request(app)
       .post('/api/v1/copilot/chat/stream')
-      .set(authHeaderFor())
       .send({
         message: 'Giá điện giờ cao điểm?',
         building_id: 'office_tower_01',
@@ -88,7 +87,6 @@ describe('Story 3.5: Copilot SSE Streaming Relay', () => {
 
     const res = await request(app)
       .post('/api/v1/copilot/chat/stream')
-      .set(authHeaderFor())
       .send({
         message: 'Kiểm tra năng lượng',
         building_id: 'office_tower_01',
@@ -107,7 +105,6 @@ describe('Story 3.5: Copilot SSE Streaming Relay', () => {
 
     const res = await request(app)
       .post('/api/v1/copilot/chat/stream')
-      .set(authHeaderFor())
       .send({
         message: 'Kiểm tra năng lượng',
       });

@@ -1,17 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
-import app from '../src/app';
-import prisma from '../src/db';
+import app from './helpers/adminApp';
+const mockPrisma = { conversation: { createMany: vi.fn() } };
+global.__mockPrisma = mockPrisma;
 
 describe('Express Proxy Routes with Mocked Fetch', () => {
   const originalFetch = global.fetch;
 
   beforeEach(() => {
     // Clear cache before each test
-    request(app)
-      .post('/api/v1/energy/cache/clear')
-      .set(global.authHeaderFor('ADMIN'));
-    vi.spyOn(prisma.conversation, 'createMany').mockResolvedValue({ count: 2 });
+    request(app).post('/api/v1/energy/cache/clear');
+    mockPrisma.conversation.createMany.mockResolvedValue({ count: 2 });
   });
 
   afterEach(() => {
@@ -32,9 +31,7 @@ describe('Express Proxy Routes with Mocked Fetch', () => {
       json: async () => mockForecast,
     });
 
-    const res = await request(app)
-      .get('/api/v1/forecast/predict')
-      .set(global.authHeaderFor('ADMIN'));
+    const res = await request(app).get('/api/v1/forecast/predict');
     expect(res.status).toBe(200);
     expect(res.body.building_id).toBe('office_tower_01');
     expect(res.body.forecast[0].predicted_kwh).toBe(155.0);
@@ -62,22 +59,16 @@ describe('Express Proxy Routes with Mocked Fetch', () => {
     });
 
     // Clear cache first
-    await request(app)
-      .post('/api/v1/energy/cache/clear')
-      .set(global.authHeaderFor('ADMIN'));
+    await request(app).post('/api/v1/energy/cache/clear');
 
     // First request -> MISS
-    const res1 = await request(app)
-      .get('/api/v1/energy/metrics')
-      .set(global.authHeaderFor('ADMIN'));
+    const res1 = await request(app).get('/api/v1/energy/metrics');
     expect(res1.status).toBe(200);
     expect(res1.headers['x-cache']).toBe('MISS');
     expect(res1.body.total_consumption_kwh).toBe(50000);
 
     // Second request -> HIT (should not call fetch again)
-    const res2 = await request(app)
-      .get('/api/v1/energy/metrics')
-      .set(global.authHeaderFor('ADMIN'));
+    const res2 = await request(app).get('/api/v1/energy/metrics');
     expect(res2.status).toBe(200);
     expect(res2.headers['x-cache']).toBe('HIT');
     expect(global.fetch).toHaveBeenCalledTimes(1);
@@ -97,7 +88,6 @@ describe('Express Proxy Routes with Mocked Fetch', () => {
 
     const res = await request(app)
       .post('/api/v1/copilot/chat')
-      .set(global.authHeaderFor('ADMIN'))
       .send({
         message: 'Tình trạng HVAC thế nào?',
         building_id: 'office_tower_01',
