@@ -46,6 +46,8 @@ from src.mlops.config import (
 
 logger = logging.getLogger("MLOpsTracking")
 
+QUANTILE_ARTIFACT_PATH = "quantile_model"
+
 
 class ChampionUnavailable(Exception):
     """MLflow is not initialised (no store / no champion alias). Fall back to models_saved/."""
@@ -112,13 +114,24 @@ def _champion_lock_path(tracking_uri: Optional[str]) -> Path:
     return base / ".champion.lock"
 
 
+def _version_has_quantile(client: Any, name: str, version: str) -> bool:
+    """Whether the run behind a registered version carries the ``quantile_model`` artifact."""
+    run_id = client.get_model_version(name, str(version)).run_id
+    return any(a.path == QUANTILE_ARTIFACT_PATH for a in client.list_artifacts(run_id))
+
+
 def register_and_bootstrap_champion(
     version: str,
     name: str = REGISTERED_MODEL_NAME,
     tracking_uri: Optional[str] = None,
+    new_has_quantile: bool = False,
 ) -> Dict[str, Any]:
     """
     Set-if-absent ``champion`` alias.
+
+    One exception (Story 4.13): a champion whose run has no ``quantile_model`` cannot serve the
+    forecast band, so when ``new_has_quantile`` is true that legacy champion is replaced by the
+    new version. A champion that already has the artifact is never replaced here.
 
     The whole check-alias -> set-alias section runs under a filesystem lock
     because MLflow + SQLite has no atomic compare-and-set for aliases; two
@@ -155,6 +168,16 @@ def register_and_bootstrap_champion(
         if existing_version is None:
             client.set_registered_model_alias(name, CHAMPION_ALIAS, version)
             logger.info("Bootstrapped first champion: %s version %s.", name, version)
+            return {"alias_set": True, "champion_version": version}
+
+        if new_has_quantile and not _version_has_quantile(client, name, existing_version):
+            client.set_registered_model_alias(name, CHAMPION_ALIAS, version)
+            logger.info(
+                "Champion version %s has no %s; replaced by version %s, which has one.",
+                existing_version,
+                QUANTILE_ARTIFACT_PATH,
+                version,
+            )
             return {"alias_set": True, "champion_version": version}
 
         logger.info(
@@ -254,6 +277,7 @@ def track_training_run(
     artifact_location: Optional[str] = None,
     bootstrap_champion: bool = True,
     tags: Optional[Dict[str, str]] = None,
+    quantile_model: Any = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Log one completed XGBoost training run to MLflow and bootstrap the champion.
@@ -286,12 +310,17 @@ def track_training_run(
         if tags:
             mlflow.set_tags({str(k): str(v) for k, v in tags.items()})
 
+        if quantile_model is not None:
+            # Same run, before the version is registered: the champion version carries both.
+            mlflow.xgboost.log_model(quantile_model, artifact_path=QUANTILE_ARTIFACT_PATH)
         model_info = mlflow.xgboost.log_model(model, artifact_path="model")
         model_version = mlflow.register_model(model_info.model_uri, REGISTERED_MODEL_NAME)
         version = str(model_version.version)
 
     if bootstrap_champion:
-        champion = register_and_bootstrap_champion(version, tracking_uri=tracking_uri)
+        champion = register_and_bootstrap_champion(
+            version, tracking_uri=tracking_uri, new_has_quantile=quantile_model is not None
+        )
     else:
         champion = {
             "alias_set": False,
@@ -377,6 +406,38 @@ def load_champion_forecaster(tracking_uri: Optional[str] = None) -> Tuple[Any, s
 
     logger.info("Loaded champion %s version %s.", REGISTERED_MODEL_NAME, version)
     return model, version
+
+
+def load_champion_quantile_model(tracking_uri: Optional[str] = None) -> Any:
+    """
+    Load the ``quantile_model`` artifact logged in the champion version's run.
+
+    Raises :class:`ChampionUnavailable` when there is no champion (caller falls back to disk) and
+    :class:`ChampionArtifactError` when the champion exists but its run has no loadable quantile model.
+    """
+    if not mlflow_available():
+        raise ChampionUnavailable("mlflow is not installed")
+    if not is_mlflow_initialised(tracking_uri):
+        raise ChampionUnavailable("MLflow store is not initialised")
+
+    import mlflow
+    from mlflow.exceptions import MlflowException
+    from mlflow.tracking import MlflowClient
+
+    configure(tracking_uri=tracking_uri)
+    try:
+        mv = MlflowClient().get_model_version_by_alias(REGISTERED_MODEL_NAME, CHAMPION_ALIAS)
+    except MlflowException as exc:
+        if _is_not_found(exc):
+            raise ChampionUnavailable(f"No champion alias resolvable: {exc}") from exc
+        raise ChampionArtifactError(f"Could not resolve champion alias: {exc}") from exc
+    version = str(mv.version)
+    try:
+        return mlflow.xgboost.load_model(f"runs:/{mv.run_id}/{QUANTILE_ARTIFACT_PATH}")
+    except Exception as exc:
+        raise ChampionArtifactError(
+            f"Champion model version {version} has no loadable {QUANTILE_ARTIFACT_PATH}: {exc}", version=version
+        ) from exc
 
 
 def champion_health(tracking_uri: Optional[str] = None) -> Dict[str, Any]:

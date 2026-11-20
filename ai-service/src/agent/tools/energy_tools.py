@@ -38,13 +38,13 @@ def query_forecast_summary() -> Dict[str, Any]:
     df_fc = predict_next_24h()
     max_idx = df_fc["predicted_kwh"].idxmax()
     max_row = df_fc.loc[max_idx]
-    ci = float(max_row["upper_bound_95"] - max_row["predicted_kwh"])
+    lower, upper = float(max_row["lower_bound_95"]), float(max_row["upper_bound_95"])
     return {
         "forecast_horizon": "24 hours",
         "expected_peak_kw": float(max_row["predicted_kwh"]),
         "peak_timestamp": str(max_row["timestamp"]),
         "average_forecast_kwh": round(float(df_fc["predicted_kwh"].mean()), 1),
-        "confidence_interval_95": f"±{ci:.1f} kW",
+        "confidence_interval_95": f"{lower:.1f} đến {upper:.1f} kW",
     }
 
 

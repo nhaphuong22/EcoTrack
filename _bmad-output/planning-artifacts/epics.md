@@ -1330,6 +1330,27 @@ So that I can judge how much to trust the forecast at a given hour.
 **When** the endpoint is called
 **Then** it returns the same explicit `ERR_MODEL_NOT_FOUND` error as for a missing forecaster; it does not fall back to the fixed band silently
 
+**Given** a training run or a guarded retrain (Story 4.8)
+**When** it completes
+**Then** the 2.5%, 50% and 97.5% quantile models are trained in the same run and registered in the same MLflow `champion` version as the point forecaster, so promotion and rollback move all of them together
+**And** the promotion gate of Story 4.8 is unchanged and still decides on the point forecaster's error; `predicted_kwh` keeps coming from the point forecaster, and the 50% quantile is trained and reported in the evaluation only
+
+**Given** a champion version that lacks the quantile artifacts
+**When** the forecast is requested
+**Then** it returns `ERR_MODEL_NOT_FOUND` as above, and the status endpoint (Story 4.10) still reports that champion normally
+
+**Given** the learned quantiles cross or fall outside the point forecast at some hour
+**When** the response is built
+**Then** `lower_bound_95 = max(0, min(q2.5, predicted_kwh))` and `upper_bound_95 = max(q97.5, predicted_kwh)`, so the bounds always enclose `predicted_kwh` and the lower bound is never below 0
+
+**Given** the 24-hour autoregressive forecast on the held-out test split
+**When** the intervals are evaluated
+**Then** the report states the 95% coverage and mean width overall and for each horizon from 1 h to 24 h, next to the same figures for the `±1.96 × RMSE` band, and does not hide coverage below 95% at the far horizons
+
+**Given** the five places that compute `±1.96 × RMSE` in `serving_frame.py`
+**When** the story ships
+**Then** they use one shared helper that applies the learned quantiles, the tests that assert the `1.96 × RMSE` formula are replaced by tests of the new bounds, and the forecast endpoint still meets the 300 ms p95 budget (NFR3)
+
 ## Epic 5: Secure Access & RBAC
 
 Users sign in with a role, sessions renew and revoke safely, and the open endpoints from earlier epics are locked down behind authentication and a role matrix. Each story adds only the tables it needs.

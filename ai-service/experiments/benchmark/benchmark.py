@@ -15,6 +15,7 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error, r2_score
 
 from experiments.benchmark.models import BaseForecaster, get_registered_forecasters
+from src.models.train_models import XGB_FEATURE_COLUMNS, train_quantile_forecaster, train_xgboost_forecaster
 
 BENCHMARK_COLUMNS: List[str] = [
     "model",
@@ -31,6 +32,7 @@ BENCHMARK_COLUMNS: List[str] = [
 # Per-horizon (Story 4.4) output schemas.
 DEFAULT_HORIZON = 24
 HORIZON_COLUMNS: List[str] = ["model", "horizon_h", "mae_kwh", "rmse_kwh"]
+COVERAGE_COLUMNS: List[str] = ["horizon_h", "method", "coverage", "mean_width_kwh"]
 PREDICTION_COLUMNS: List[str] = [
     "model",
     "origin_timestamp",
@@ -258,3 +260,63 @@ def run_horizon_scoring(
         predictions = pd.DataFrame(columns=PREDICTION_COLUMNS)
 
     return results_by_horizon[HORIZON_COLUMNS], predictions[PREDICTION_COLUMNS]
+
+
+def run_interval_coverage(
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    horizon: int = DEFAULT_HORIZON,
+) -> pd.DataFrame:
+    """
+    Story 4.13: empirical 95% coverage and mean width of the learned quantile band against the old
+    ``predicted +/- 1.96 x RMSE`` band, on held-out rolling-origin recursive forecasts.
+
+    Uses the served XGBoost point model and the multi-quantile model trained on ``train_df``; the
+    recursion matches ``XGBoostForecaster.forecast_grid`` (lag_1h is the model's own previous
+    prediction), and the quantile model sees the same feature row. Returns one row per
+    (horizon_h, method) with ``horizon_h`` 1..horizon plus ``horizon_h == 0`` for all horizons pooled;
+    ``method`` is ``learned_quantile`` or ``fixed_rmse``. Low coverage is reported, not hidden.
+    """
+    from src.data_pipeline.serving_frame import _bounds_from_quantiles
+
+    point, point_metrics, _ = train_xgboost_forecaster(train_df, test_df)
+    quantile_model, _, _ = train_quantile_forecaster(train_df, test_df)
+    half_width = 1.96 * float(point_metrics["rmse_kwh"])
+
+    feats = test_df[XGB_FEATURE_COLUMNS].to_numpy(dtype=float)
+    actual = test_df["meter_reading"].to_numpy(dtype=float)
+    idx_lag1 = XGB_FEATURE_COLUMNS.index("lag_1h")
+    n = len(test_df)
+
+    hit = {"learned_quantile": [], "fixed_rmse": []}
+    width = {"learned_quantile": [], "fixed_rmse": []}
+    rows: List[Dict[str, Any]] = []
+    prev: Optional[np.ndarray] = None
+    for h in range(1, min(horizon, n - 1) + 1):
+        target = np.arange(h, n)
+        feat = feats[target].copy()
+        if h >= 2 and prev is not None:
+            feat[:, idx_lag1] = prev[: target.size]
+        feat_df = pd.DataFrame(feat, columns=XGB_FEATURE_COLUMNS)
+        pred = np.asarray(point.predict(feat_df), dtype=float)
+        prev = pred
+        q = np.asarray(quantile_model.predict(feat_df), dtype=float).reshape(len(pred), -1)
+        bands = {
+            "learned_quantile": _bounds_from_quantiles(pred, q[:, 0], q[:, -1]),
+            "fixed_rmse": (np.maximum(0.0, pred - half_width), pred + half_width),
+        }
+        for method, (lo, hi) in bands.items():
+            covered = (actual[target] >= lo) & (actual[target] <= hi)
+            hit[method].append(covered)
+            width[method].append(hi - lo)
+            rows.append({
+                "horizon_h": h, "method": method,
+                "coverage": float(covered.mean()), "mean_width_kwh": float((hi - lo).mean()),
+            })
+    for method in hit:
+        rows.append({
+            "horizon_h": 0, "method": method,
+            "coverage": float(np.concatenate(hit[method]).mean()),
+            "mean_width_kwh": float(np.concatenate(width[method]).mean()),
+        })
+    return pd.DataFrame(rows, columns=COVERAGE_COLUMNS)

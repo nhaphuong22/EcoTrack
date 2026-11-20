@@ -202,3 +202,49 @@ def test_register_and_bootstrap_champion_fails_loud_on_non_not_found_mlflow_erro
 
     assert resolve_champion_version() == "1"
 
+
+
+def _tiny_quantile(model_params):
+    import numpy as np
+    import xgboost as xgb
+
+    df = engineer_features(load_dataset(FIXTURE_CSV))
+    train_df, _ = split_time_series_data(df, train_ratio=0.8)
+    q = xgb.XGBRegressor(
+        n_estimators=5, max_depth=2, objective="reg:quantileerror",
+        quantile_alpha=np.array([0.025, 0.5, 0.975]), random_state=42, n_jobs=1,
+    )
+    return q.fit(train_df[XGB_FEATURE_COLUMNS], train_df["meter_reading"])
+
+
+def _champion_version():
+    return str(MlflowClient().get_model_version_by_alias(REGISTERED_MODEL_NAME, CHAMPION_ALIAS).version)
+
+
+def test_legacy_champion_without_quantile_is_replaced_by_version_with_quantile(temp_store):
+    model, params, metrics, row_counts = _tiny_trained()
+    track_training_run(model, params, metrics, XGB_FEATURE_COLUMNS, row_counts)  # legacy v1
+    second = track_training_run(
+        model, params, metrics, XGB_FEATURE_COLUMNS, row_counts, quantile_model=_tiny_quantile(params)
+    )
+    assert second["version"] == "2"
+    assert second["alias_set"] is True
+    assert _champion_version() == "2"
+
+
+def test_champion_with_quantile_is_never_replaced(temp_store):
+    model, params, metrics, row_counts = _tiny_trained()
+    q = _tiny_quantile(params)
+    track_training_run(model, params, metrics, XGB_FEATURE_COLUMNS, row_counts, quantile_model=q)
+    second = track_training_run(model, params, metrics, XGB_FEATURE_COLUMNS, row_counts, quantile_model=q)
+    assert second["version"] == "2"
+    assert second["alias_set"] is False
+    assert _champion_version() == "1"
+
+
+def test_legacy_champion_kept_when_new_version_has_no_quantile(temp_store):
+    model, params, metrics, row_counts = _tiny_trained()
+    track_training_run(model, params, metrics, XGB_FEATURE_COLUMNS, row_counts)
+    second = track_training_run(model, params, metrics, XGB_FEATURE_COLUMNS, row_counts)
+    assert second["alias_set"] is False
+    assert _champion_version() == "1"

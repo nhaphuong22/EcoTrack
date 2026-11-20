@@ -55,3 +55,9 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-12-monitor-the-model-as-an-admin.md`
   summary: Switching to another dashboard tab unmounts the MLOps panel, so a tracked retrain run, its polling and the disabled Retrain button are lost until the next click.
   evidence: Real but recoverable: the next Retrain click gets a 409 and tracking resumes. Fix by lifting the hook into `App` or persisting the run in `sessionStorage`; the spec only accepts reload, so this goes beyond it.
+
+## Deferred from: bmad-build review of story-4.13 (2026-11-21)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-13-forecast-with-learned-prediction-intervals.md`
+  summary: Anomaly scoring and the time series now need the quantile artifact because `_score_feature_df` computes the band through the shared helper.
+  evidence: Real but required by the acceptance criteria (the helper replaces all five band sites). A degraded path that scores anomalies without the band would limit the blast radius of a missing or corrupt artifact.
