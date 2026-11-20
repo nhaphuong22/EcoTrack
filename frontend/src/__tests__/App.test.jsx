@@ -12,6 +12,8 @@ vi.mock('../services/api', () => ({
   fetchZones: vi.fn(),
   fetchSystemHealth: vi.fn(),
   sendCopilotMessage: vi.fn(),
+  fetchMLOpsStatus: vi.fn(),
+  triggerMLOpsRetrain: vi.fn(),
 }));
 
 // Mock recharts ResponsiveContainer to avoid jsdom layout warning
@@ -337,5 +339,19 @@ describe('App - Story 4.12 MLOps tab gating', () => {
     render(<App user={user} />);
     await waitFor(() => expect(document.getElementById('tab-floorplan')).toBeInTheDocument());
     expect(Boolean(document.getElementById('tab-mlops'))).toBe(visible);
+  });
+
+  it.each([
+    ['ADMIN', { role: 'ADMIN', staff: [] }, true],
+    ['MANAGER of the dashboard building', staff('office_tower_01', 'MANAGER'), false],
+  ])('opening the MLOps tab as %s shows the panel; Retrain visible: %s', async (_label, user, retrain) => {
+    api.fetchMLOpsStatus.mockResolvedValue({
+      champion: { status: 'resolved', version: '1', metrics: null },
+      drift: null, anomaly_quality: null, retrain_history: [], benchmark: null, errors: {},
+    });
+    render(<App user={user} />);
+    fireEvent.click(await screen.findByRole('tab', { name: /MLOps/ }));
+    expect(await screen.findByRole('heading', { name: 'Giám sát mô hình (MLOps)' })).toBeInTheDocument();
+    expect(Boolean(screen.queryByRole('button', { name: 'Retrain' }))).toBe(retrain);
   });
 });

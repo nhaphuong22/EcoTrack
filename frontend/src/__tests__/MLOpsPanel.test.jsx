@@ -20,7 +20,7 @@ vi.mock('recharts', async () => {
 
 const payload = (over = {}) => ({
   champion: {
-    status: 'ok',
+    status: 'resolved',
     version: '7',
     trained_at: '2026-11-01',
     metrics: { mape: 4.2 },
@@ -241,6 +241,89 @@ describe('MLOpsPanel - Story 4.12', () => {
     expect(screen.getByRole('heading', { name: 'Champion' })).toBeInTheDocument();
   });
 
+  it('409 with a run_id waits for that run, not for any new row', async () => {
+    api.triggerMLOpsRetrain.mockRejectedValue(httpError(409, { detail: 'x', run_id: 'r9' }));
+    await mount();
+    await retrainFlow();
+    api.fetchMLOpsStatus.mockResolvedValue(
+      payload({ retrain_history: [{ run_id: 'other' }, { run_id: 'old' }] }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+    expect(screen.getByRole('button', { name: /Đang huấn luyện/ })).toBeDisabled();
+    api.fetchMLOpsStatus.mockResolvedValue(
+      payload({ retrain_history: [{ run_id: 'r9' }, { run_id: 'old' }] }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+    expect(screen.getByRole('button', { name: 'Retrain' })).toBeEnabled();
+  });
+
+  it('disables Retrain while the POST is still in flight', async () => {
+    let done;
+    api.triggerMLOpsRetrain.mockReturnValue(new Promise((resolve) => (done = resolve)));
+    await mount();
+    await retrainFlow();
+    expect(screen.getByRole('button', { name: /Đang huấn luyện/ })).toBeDisabled();
+    await act(async () => done({ run_id: 'r1' }));
+  });
+
+  it('loads once on mount even when the browser tab is hidden', async () => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    try {
+      await mount();
+      expect(api.fetchMLOpsStatus).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText(/Đang tải/)).not.toBeInTheDocument();
+    } finally {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    }
+  });
+
+  it('a run that finished while the tab was hidden past the ceiling is not reported as timed out', async () => {
+    api.triggerMLOpsRetrain.mockResolvedValue({ run_id: 'r1' });
+    await mount();
+    await retrainFlow();
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    try {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(16 * 60 * 1000);
+      });
+      api.fetchMLOpsStatus.mockResolvedValue(
+        payload({ retrain_history: [{ run_id: 'r1', outcome: 'promoted' }] }),
+      );
+    } finally {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    }
+    document.dispatchEvent(new Event('visibilitychange'));
+    await act(async () => {});
+    expect(screen.queryByText(/Vẫn đang chạy hoặc chưa rõ/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retrain' })).toBeEnabled();
+  });
+
+  it('shows no banner for a resolved champion', async () => {
+    await mount();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows a generic banner for an unrecognised champion status', async () => {
+    api.fetchMLOpsStatus.mockResolvedValue(
+      payload({ champion: { status: 'weird', version: '1', metrics: null } }),
+    );
+    await mount();
+    expect(screen.getByRole('alert')).toHaveTextContent('weird');
+  });
+
+  it('keeps the metrics of a fallback champion (real numbers from local metadata)', async () => {
+    api.fetchMLOpsStatus.mockResolvedValue(
+      payload({ champion: { status: 'fallback', version: 'local', metrics: { mape: 6.5 } } }),
+    );
+    await mount();
+    expect(screen.getByText('6.500')).toBeInTheDocument();
+  });
+
   it.each([429, 502, 504])(
     '%i shows the gateway message and keeps the button usable',
     async (code) => {
@@ -259,6 +342,7 @@ describe('MLOps viewer rule stays in sync with the gateway', () => {
     const file = ['../backend', 'backend']
       .map((dir) => resolve(process.cwd(), dir, 'src/routes/mlops.js'))
       .find(existsSync);
+    expect(file, 'backend/src/routes/mlops.js not found from the test cwd').toBeDefined();
     const source = readFileSync(file, 'utf8');
     const backend = source.match(/DASHBOARD_BUILDING = '([^']+)'/)?.[1];
     expect(backend).toBeDefined();

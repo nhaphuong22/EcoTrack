@@ -22,6 +22,7 @@ export function useMLOpsStatus() {
   const [runId, setRunId] = useState(null);
   const [notice, setNotice] = useState(null);
   const [timedOut, setTimedOut] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const runRef = useRef({ id: null, since: 0, known: [] });
   const seqRef = useRef(0);
   const dataRef = useRef(null);
@@ -42,7 +43,7 @@ export function useMLOpsStatus() {
         setRunId(null);
       }
     } catch (err) {
-      setError(errorText(err)); // keep last data
+      if (seq === seqRef.current) setError(errorText(err)); // keep last data
     } finally {
       setLoading(false);
     }
@@ -50,14 +51,15 @@ export function useMLOpsStatus() {
 
   useEffect(() => {
     let timer;
-    const tick = () => {
+    // Refresh first, so a run that finished is never reported as timed out.
+    const tick = async () => {
+      await load();
       const { id, since } = runRef.current;
       if (id && Date.now() - since >= CEILING_MS) {
         runRef.current = { id: null, since: 0, known: [] };
         setRunId(null);
         setTimedOut(true);
       }
-      load();
     };
     const stop = () => {
       clearInterval(timer);
@@ -74,10 +76,8 @@ export function useMLOpsStatus() {
         start();
       }
     };
-    if (!document.hidden) {
-      load();
-      start();
-    }
+    load(); // always load once, even when mounted in a hidden browser tab
+    if (!document.hidden) start();
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
       stop();
@@ -85,8 +85,7 @@ export function useMLOpsStatus() {
     };
   }, [load, runId]);
 
-  const track = (id) => {
-    const known = (dataRef.current?.retrain_history || []).map((h) => h.run_id);
+  const track = (id, known) => {
     runRef.current = { id: id || 'unknown', since: Date.now(), known };
     setTimedOut(false);
     setRunId(runRef.current.id);
@@ -94,17 +93,21 @@ export function useMLOpsStatus() {
 
   const retrain = useCallback(async () => {
     setNotice(null);
+    setSubmitting(true);
+    const known = (dataRef.current?.retrain_history || []).map((h) => h.run_id); // before the POST
     try {
       const res = await triggerMLOpsRetrain();
-      track(res?.run_id);
+      track(res?.run_id, known);
       setNotice({ kind: 'info', text: 'Đã bắt đầu huấn luyện lại.' });
     } catch (err) {
       if (err?.response?.status === 409) {
-        track(err.response.data?.run_id);
+        track(err.response.data?.run_id, known);
         setNotice({ kind: 'info', text: 'Đang có một lần huấn luyện lại đang chạy.' });
       } else {
         setNotice({ kind: 'error', text: errorText(err) });
       }
+    } finally {
+      setSubmitting(false);
     }
   }, []);
 
@@ -112,7 +115,7 @@ export function useMLOpsStatus() {
     data,
     loading,
     error,
-    retraining: Boolean(runId),
+    retraining: Boolean(runId) || submitting,
     timedOut,
     notice,
     retrain,

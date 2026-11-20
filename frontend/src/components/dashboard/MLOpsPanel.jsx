@@ -76,7 +76,10 @@ export default function MLOpsPanel({ isAdmin = false }) {
         role="alert"
         className="rounded-md border border-crit/30 bg-crit-bg px-4 py-3 text-sm text-crit"
       >
-        {error || 'Không có dữ liệu.'}
+        {error || 'Không có dữ liệu.'}{' '}
+        <button className="btn btn-quiet btn-sm" onClick={refetch}>
+          Thử lại
+        </button>
       </p>
     );
 
@@ -90,7 +93,7 @@ export default function MLOpsPanel({ isAdmin = false }) {
   } = data;
   const errors = rawErrors || {};
   const status = champion?.status;
-  const unhealthy = status && BANNERS[status];
+  const unhealthy = status && status !== 'resolved';
   const signals = Object.entries(drift?.signals || {}).map(([name, s]) => ({
     name,
     psi: s?.psi,
@@ -164,7 +167,7 @@ export default function MLOpsPanel({ isAdmin = false }) {
           role="alert"
           className="rounded-md border border-crit/30 bg-crit-bg px-4 py-3 text-sm text-crit"
         >
-          <p>{BANNERS[status]}</p>
+          <p>{BANNERS[status] || `Trạng thái champion không xác định (${status}).`}</p>
           {status === 'broken' && champion.error && (
             <p className="mt-1 text-base font-bold">{champion.error}</p>
           )}
@@ -183,7 +186,7 @@ export default function MLOpsPanel({ isAdmin = false }) {
             Trạng thái: <b>{status ?? '—'}</b>
           </span>
         </p>
-        {champion?.metrics && !unhealthy ? (
+        {champion?.metrics && status !== 'broken' ? (
           <p className="mt-2 flex flex-wrap gap-x-6 text-ink-2">
             {Object.entries(champion.metrics).map(([k, v]) => (
               <span key={k}>
