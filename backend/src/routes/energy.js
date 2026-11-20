@@ -1,6 +1,7 @@
 const express = require('express');
 const { energyCache } = require('../utils/cache');
 const { callAIService } = require('../utils/aiClient');
+const requireRole = require('../middleware/requireRole');
 
 const router = express.Router();
 
@@ -51,7 +52,7 @@ router.get('/cache/stats', (req, res) => {
 });
 
 // POST /api/v1/energy/cache/clear
-router.post('/cache/clear', (req, res) => {
+router.post('/cache/clear', requireRole('ADMIN'), (req, res) => {
   energyCache.clear();
   res.json({ message: 'Energy TTL cache invalidated successfully.' });
 });

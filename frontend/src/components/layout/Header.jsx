@@ -1,6 +1,18 @@
-import { Zap, RefreshCw, Building2 } from 'lucide-react';
+import { Zap, RefreshCw, Building2, User, LogOut } from 'lucide-react';
 
-export default function Header({ onRefresh, loading }) {
+export default function Header({ onRefresh, loading, user, onLogout }) {
+  const getRoleBadgeColor = (role) => {
+    switch (role) {
+      case 'ADMIN':
+        return 'bg-rose-500/15 text-rose-400 border-rose-500/30';
+      case 'MANAGER':
+        return 'bg-amber-500/15 text-amber-400 border-amber-500/30';
+      case 'TECHNICIAN':
+      default:
+        return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
+    }
+  };
+
   return (
     <header className="sticky top-0 z-30 border-b border-slate-700/60 bg-slate-900/90 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-screen-2xl items-center justify-between px-6">
@@ -19,23 +31,56 @@ export default function Header({ onRefresh, loading }) {
         </div>
 
         {/* Centre: Building selector */}
-        <div className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-1.5">
+        <div className="hidden md:flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-1.5">
           <Building2 size={14} className="text-slate-400" />
           <span className="text-sm font-medium text-slate-200">Office Tower 01</span>
           <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" title="Live" />
         </div>
 
-        {/* Right: Refresh */}
-        <button
-          id="header-refresh-btn"
-          onClick={onRefresh}
-          disabled={loading}
-          className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-sm text-slate-300 transition hover:border-emerald-500/50 hover:bg-emerald-500/10 hover:text-emerald-400 disabled:opacity-40"
-          title="Refresh data"
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          <span className="hidden sm:inline">Cập nhật</span>
-        </button>
+        {/* Right side controls: Refresh, User Profile, Logout */}
+        <div className="flex items-center gap-3">
+          <button
+            id="header-refresh-btn"
+            onClick={onRefresh}
+            disabled={loading}
+            className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-sm text-slate-300 transition hover:border-emerald-500/50 hover:bg-emerald-500/10 hover:text-emerald-400 disabled:opacity-40"
+            title="Refresh data"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            <span className="hidden sm:inline">Cập nhật</span>
+          </button>
+
+          {/* User Profile Pill */}
+          {user && (
+            <div
+              id="user-profile-badge"
+              className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs text-slate-200"
+            >
+              <User size={14} className="text-slate-400" />
+              <span className="font-semibold">{user.name || user.email}</span>
+              <span
+                className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider border ${getRoleBadgeColor(
+                  user.role
+                )}`}
+              >
+                {user.role}
+              </span>
+            </div>
+          )}
+
+          {/* Logout Button */}
+          {user && onLogout && (
+            <button
+              id="logout-btn"
+              onClick={onLogout}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-700/80 bg-slate-800/40 px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-400"
+              title="Đăng xuất khỏi hệ thống"
+            >
+              <LogOut size={14} />
+              <span className="hidden sm:inline">Đăng xuất</span>
+            </button>
+          )}
+        </div>
       </div>
     </header>
   );

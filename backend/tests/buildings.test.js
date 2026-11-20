@@ -55,7 +55,9 @@ describe('CRUD Buildings & History Endpoints in Express Backend', () => {
 
   describe('GET /api/v1/buildings', () => {
     it('should return list of buildings with total count', async () => {
-      const res = await request(app).get('/api/v1/buildings');
+      const res = await request(app)
+        .get('/api/v1/buildings')
+        .set(global.authHeaderFor('ADMIN'));
       expect(res.status).toBe(200);
       expect(res.body.total).toBe(2);
       expect(res.body.buildings).toHaveLength(2);
@@ -68,7 +70,9 @@ describe('CRUD Buildings & History Endpoints in Express Backend', () => {
     it('should return building details when building exists', async () => {
       mockPrisma.building.findUnique.mockResolvedValue(mockBuilding1);
 
-      const res = await request(app).get('/api/v1/buildings/office_tower_01');
+      const res = await request(app)
+        .get('/api/v1/buildings/office_tower_01')
+        .set(global.authHeaderFor('ADMIN'));
       expect(res.status).toBe(200);
       expect(res.body.id).toBe('office_tower_01');
       expect(res.body.name).toBe('EcoTrack Headquarter Tower');
@@ -78,7 +82,9 @@ describe('CRUD Buildings & History Endpoints in Express Backend', () => {
     it('should return 404 when building is not found', async () => {
       mockPrisma.building.findUnique.mockResolvedValue(null);
 
-      const res = await request(app).get('/api/v1/buildings/unknown_id');
+      const res = await request(app)
+        .get('/api/v1/buildings/unknown_id')
+        .set(global.authHeaderFor('ADMIN'));
       expect(res.status).toBe(404);
       expect(res.body.detail).toContain('not found');
     });
@@ -103,6 +109,7 @@ describe('CRUD Buildings & History Endpoints in Express Backend', () => {
 
       const res = await request(app)
         .post('/api/v1/buildings')
+        .set(global.authHeaderFor('ADMIN'))
         .send(newBuildingPayload);
 
       expect(res.status).toBe(201);
@@ -115,6 +122,7 @@ describe('CRUD Buildings & History Endpoints in Express Backend', () => {
 
       const res = await request(app)
         .post('/api/v1/buildings')
+        .set(global.authHeaderFor('ADMIN'))
         .send({
           id: 'office_tower_01',
           name: 'Duplicate Tower',
@@ -127,6 +135,7 @@ describe('CRUD Buildings & History Endpoints in Express Backend', () => {
     it('should return 422 Unprocessable Entity when validation fails (missing required name)', async () => {
       const res = await request(app)
         .post('/api/v1/buildings')
+        .set(global.authHeaderFor('ADMIN'))
         .send({
           id: 'invalid_tower',
           // missing name
@@ -157,7 +166,9 @@ describe('CRUD Buildings & History Endpoints in Express Backend', () => {
       mockPrisma.building.findUnique.mockResolvedValue(mockBuilding1);
       mockPrisma.meterReading.findMany.mockResolvedValue(mockReadingsDesc);
 
-      const res = await request(app).get('/api/v1/buildings/office_tower_01/history?limit=10');
+      const res = await request(app)
+        .get('/api/v1/buildings/office_tower_01/history?limit=10')
+        .set(global.authHeaderFor('ADMIN'));
       expect(res.status).toBe(200);
       expect(res.body.building_id).toBe('office_tower_01');
       expect(res.body.count).toBe(2);
@@ -170,7 +181,9 @@ describe('CRUD Buildings & History Endpoints in Express Backend', () => {
     it('should return 404 when querying history of non-existent building', async () => {
       mockPrisma.building.findUnique.mockResolvedValue(null);
 
-      const res = await request(app).get('/api/v1/buildings/ghost_tower/history');
+      const res = await request(app)
+        .get('/api/v1/buildings/ghost_tower/history')
+        .set(global.authHeaderFor('ADMIN'));
       expect(res.status).toBe(404);
       expect(res.body.detail).toContain('not found');
     });

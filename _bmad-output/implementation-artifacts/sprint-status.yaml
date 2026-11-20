@@ -51,15 +51,15 @@ development_status:
   2-3-show-real-system-status: done
   epic-2-retrospective: optional
 
-  epic-3: in-progress
+  epic-3: done
   3-1-build-a-searchable-energy-knowledge-base: done
-  3-2-answer-knowledge-questions-with-cited-sources: backlog
-  3-3-keep-context-across-turns: backlog
-  3-4-stream-copilot-answers-from-the-ai-service: backlog
-  3-5-relay-the-streamed-copilot-answer: backlog
-  3-6-read-streamed-formatted-copilot-answers-with-sources: backlog
-  3-7-make-copilot-provider-failures-visible: backlog
-  3-8-measure-rag-quality: backlog
+  3-2-answer-knowledge-questions-with-cited-sources: done
+  3-3-keep-context-across-turns: done
+  3-4-stream-copilot-answers-from-the-ai-service: done
+  3-5-relay-the-streamed-copilot-answer: done
+  3-6-read-streamed-formatted-copilot-answers-with-sources: done
+  3-7-make-copilot-provider-failures-visible: done
+  3-8-measure-rag-quality: done
   epic-3-retrospective: optional
 
   epic-4: in-progress
@@ -78,9 +78,9 @@ development_status:
   4-13-forecast-with-learned-prediction-intervals: backlog
   epic-4-retrospective: optional
 
-  epic-5: backlog
-  5-1-sign-in-with-a-role: backlog
-  5-2-stay-signed-in-and-sign-out: backlog
-  5-3-protect-operations-by-role-and-harden-the-gateway: backlog
-  5-4-sign-in-and-navigate-by-role: backlog
+  epic-5: done
+  5-1-sign-in-with-a-role: done
+  5-2-stay-signed-in-and-sign-out: done
+  5-3-protect-operations-by-role-and-harden-the-gateway: done
+  5-4-sign-in-and-navigate-by-role: done
   epic-5-retrospective: optional
