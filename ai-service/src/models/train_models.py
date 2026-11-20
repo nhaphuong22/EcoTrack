@@ -330,6 +330,53 @@ def run_pipeline(
         metadata=metadata,
     )
 
+    # 5b. MLflow tracking + first-champion registration (FR23).
+    # Best-effort and forecaster-only: the models_saved/ artifacts above stay the
+    # fallback source of truth, so a missing/unconfigured MLflow never breaks training.
+    # Metrics/params/row counts logged here reconcile with model_metadata.json (same split).
+    from src.mlops.config import mlflow_disabled
+
+    if not mlflow_disabled():
+        try:
+            from src.mlops.tracking import track_training_run
+
+            tracked_params = {
+                key: xgb_model.get_params().get(key)
+                for key in (
+                    "n_estimators",
+                    "max_depth",
+                    "learning_rate",
+                    "subsample",
+                    "colsample_bytree",
+                    "objective",
+                    "random_state",
+                )
+            }
+            tracked = track_training_run(
+                model=xgb_model,
+                params=tracked_params,
+                metrics=xgb_metrics,
+                features=XGB_FEATURE_COLUMNS,
+                row_counts={
+                    "dataset_rows": len(df_feat),
+                    "train_rows": len(train_df),
+                    "test_rows": len(test_df),
+                },
+            )
+            if tracked:
+                logger.info(
+                    "MLflow: run %s, registered version %s, champion=%s (alias_set=%s).",
+                    tracked["run_id"],
+                    tracked["version"],
+                    tracked["champion_version"],
+                    tracked["alias_set"],
+                )
+        except Exception as exc:  # never fail training because of tracking
+            logger.warning(
+                "MLflow tracking skipped (%s); models_saved/ artifacts remain the source of truth.",
+                exc,
+            )
+
     # 6. Display final summary
     print("\n" + "=" * 55)
     print("           METRICS SUMMARY & MODEL STATUS         ")

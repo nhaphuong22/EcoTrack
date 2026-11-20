@@ -1,21 +1,21 @@
-import { Zap, TrendingUp, AlertTriangle, DollarSign } from 'lucide-react';
+import { Zap, TrendingUp, AlertTriangle, Banknote } from 'lucide-react';
 
-function StatCard({ icon: Icon, label, value, subLabel, color, glowColor }) {
+// One instrument strip, not four floating cards. State tint appears only where a value carries a state.
+function Reading({ icon: Icon, label, value, unit, subLabel, tone = 'neutral' }) {
+  const toneText = { neutral: 'text-ink', warn: 'text-warn', crit: 'text-crit', ok: 'text-ok' }[tone];
+  const toneBar = { neutral: 'bg-line-strong', warn: 'bg-warn-fill', crit: 'bg-crit', ok: 'bg-ok' }[tone];
   return (
-    <div
-      className={`relative overflow-hidden rounded-2xl border ${color} bg-slate-800/60 p-5 backdrop-blur-sm transition hover:scale-[1.01]`}
-      style={{ boxShadow: `0 0 24px -8px ${glowColor}` }}
-    >
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-widest text-slate-400">{label}</p>
-          <p className="mt-1 text-2xl font-bold text-white">{value}</p>
-          {subLabel && <p className="mt-0.5 text-xs text-slate-400">{subLabel}</p>}
-        </div>
-        <div className={`rounded-xl p-2 ${color.replace('border-', 'bg-').replace('/40', '/15')}`}>
-          <Icon size={22} className="text-current opacity-80" />
-        </div>
-      </div>
+    <div className="relative bg-panel px-5 py-4">
+      <span className={`absolute inset-x-5 top-0 h-0.5 ${toneBar}`} aria-hidden="true" />
+      <p className="flex items-center gap-2 text-[13px] font-medium text-muted">
+        <Icon size={15} aria-hidden="true" />
+        {label}
+      </p>
+      <p className={`num mt-2 flex items-baseline gap-1.5 text-[28px] font-semibold leading-none ${toneText}`}>
+        {value}
+        {unit && <span className="text-sm font-medium text-muted">{unit}</span>}
+      </p>
+      {subLabel && <p className="mt-2 text-xs text-muted">{subLabel}</p>}
     </div>
   );
 }
@@ -23,66 +23,67 @@ function StatCard({ icon: Icon, label, value, subLabel, color, glowColor }) {
 export default function MetricCards({ metrics }) {
   if (!metrics) {
     return (
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="panel grid animate-pulse grid-cols-2 gap-px overflow-hidden bg-line lg:grid-cols-4" aria-busy="true">
         {[...Array(4)].map((_, i) => (
-          <div key={i} className="h-28 animate-pulse rounded-2xl bg-slate-800/60" />
+          <div key={i} className="h-[108px] bg-panel p-5">
+            <div className="h-3 w-24 rounded bg-sunken" />
+            <div className="mt-4 h-7 w-32 rounded bg-sunken" />
+          </div>
         ))}
       </div>
     );
   }
 
   const {
-    total_consumption_kwh,
-    peak_demand_kw,
-    total_anomalies_detected,
-    estimated_waste_cost_vnd,
+    total_consumption_kwh = 0,
+    peak_demand_kw = 0,
+    total_anomalies_detected = 0,
+    estimated_waste_cost_vnd = 0,
+    estimated_waste_cost_usd,
   } = metrics;
 
-  const cards = [
+  const usdValue = estimated_waste_cost_usd ?? (estimated_waste_cost_vnd / 25000);
+  const formattedUsd = usdValue > 0 && usdValue < 10 ? usdValue.toFixed(2) : usdValue.toFixed(0);
+  const wasteK = (estimated_waste_cost_vnd > 0 && estimated_waste_cost_vnd < 1000)
+    ? (estimated_waste_cost_vnd / 1000).toFixed(2)
+    : (estimated_waste_cost_vnd / 1000).toFixed(0);
+
+  const readings = [
     {
       icon: Zap,
       label: 'Tổng điện tiêu thụ (30 ngày)',
-      value: `${(total_consumption_kwh / 1000).toFixed(1)} MWh`,
+      value: (total_consumption_kwh / 1000).toFixed(1),
+      unit: 'MWh',
       subLabel: `${total_consumption_kwh.toLocaleString('vi-VN')} kWh`,
-      color: 'border-emerald-500/40 text-emerald-400',
-      glowColor: 'rgba(52,211,153,0.18)',
     },
     {
       icon: TrendingUp,
       label: 'Công suất đỉnh (Peak)',
-      value: `${peak_demand_kw.toFixed(0)} kW`,
+      value: peak_demand_kw.toFixed(0),
+      unit: 'kW',
       subLabel: 'Ghi nhận gần nhất',
-      color: 'border-sky-500/40 text-sky-400',
-      glowColor: 'rgba(56,189,248,0.18)',
     },
     {
       icon: AlertTriangle,
       label: 'Sự cố bất thường',
       value: total_anomalies_detected,
       subLabel: 'Isolation Forest phát hiện',
-      color:
-        total_anomalies_detected > 0
-          ? 'border-amber-500/40 text-amber-400'
-          : 'border-emerald-500/40 text-emerald-400',
-      glowColor:
-        total_anomalies_detected > 0
-          ? 'rgba(251,191,36,0.18)'
-          : 'rgba(52,211,153,0.18)',
+      tone: total_anomalies_detected > 0 ? 'warn' : 'ok',
     },
     {
-      icon: DollarSign,
+      icon: Banknote,
       label: 'Ước tính lãng phí',
-      value: `${(estimated_waste_cost_vnd / 1000).toFixed(0)}K VNĐ`,
-      subLabel: `≈ $${(estimated_waste_cost_vnd / 25000).toFixed(0)} USD`,
-      color: 'border-rose-500/40 text-rose-400',
-      glowColor: 'rgba(251,113,133,0.18)',
+      value: wasteK,
+      unit: 'K VNĐ',
+      subLabel: `≈ $${formattedUsd} USD`,
+      tone: estimated_waste_cost_vnd > 0 ? 'crit' : 'neutral',
     },
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-      {cards.map(c => (
-        <StatCard key={c.label} {...c} />
+    <div className="panel grid grid-cols-2 gap-px overflow-hidden bg-line lg:grid-cols-4">
+      {readings.map((r) => (
+        <Reading key={r.label} {...r} />
       ))}
     </div>
   );

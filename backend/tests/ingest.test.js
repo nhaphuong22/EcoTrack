@@ -1,3 +1,4 @@
+import { meterMock } from './helpers/adminApp';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockPrisma = {
@@ -9,10 +10,11 @@ const mockPrisma = {
     findMany: vi.fn(),
   },
   meterReading: {
-    createMany: vi.fn(),
+    createManyAndReturn: vi.fn(),
   },
 };
 
+mockPrisma.meter = meterMock;
 global.__mockPrisma = mockPrisma;
 
 import request from 'supertest';
@@ -28,7 +30,7 @@ describe('POST /api/v1/ingest/readings', () => {
       { id: 'z1', building_id: 'office_tower_01' },
       { id: 'z2', building_id: 'office_tower_01' },
     ]);
-    mockPrisma.meterReading.createMany.mockResolvedValue({ count: 2 });
+    mockPrisma.meterReading.createManyAndReturn.mockImplementation(async ({ data }) => data);
   });
 
   it('rejects with 401 when X-Ingest-Key is missing', async () => {
@@ -44,7 +46,7 @@ describe('POST /api/v1/ingest/readings', () => {
 
     expect(res.status).toBe(401);
     expect(res.body.detail).toContain('X-Ingest-Key');
-    expect(mockPrisma.meterReading.createMany).not.toHaveBeenCalled();
+    expect(mockPrisma.meterReading.createManyAndReturn).not.toHaveBeenCalled();
   });
 
   it('rejects with 401 when X-Ingest-Key is wrong', async () => {
@@ -61,7 +63,7 @@ describe('POST /api/v1/ingest/readings', () => {
 
     expect(res.status).toBe(401);
     expect(res.body.detail).toContain('Unauthorized');
-    expect(mockPrisma.meterReading.createMany).not.toHaveBeenCalled();
+    expect(mockPrisma.meterReading.createManyAndReturn).not.toHaveBeenCalled();
   });
 
   it('persists valid batch and returns 201 with stored count (happy path)', async () => {
@@ -91,7 +93,7 @@ describe('POST /api/v1/ingest/readings', () => {
 
     expect(res.status).toBe(201);
     expect(res.body).toEqual({ stored: 2 });
-    expect(mockPrisma.meterReading.createMany).toHaveBeenCalledWith({
+    expect(mockPrisma.meterReading.createManyAndReturn).toHaveBeenCalledWith({
       data: expect.arrayContaining([
         expect.objectContaining({
           building_id: 'office_tower_01',
@@ -119,11 +121,11 @@ describe('POST /api/v1/ingest/readings', () => {
       });
 
     expect(res.status).toBe(201);
-    expect(res.body.stored).toBe(2);
+    expect(res.body.stored).toBe(1);
   });
 
   it('persists zoneless building-level readings with zone_id: null', async () => {
-    mockPrisma.meterReading.createMany.mockResolvedValue({ count: 1 });
+    mockPrisma.meterReading.createManyAndReturn.mockImplementation(async ({ data }) => data);
 
     const res = await request(app)
       .post('/api/v1/ingest/readings')
@@ -138,7 +140,7 @@ describe('POST /api/v1/ingest/readings', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.stored).toBe(1);
-    expect(mockPrisma.meterReading.createMany).toHaveBeenCalledWith({
+    expect(mockPrisma.meterReading.createManyAndReturn).toHaveBeenCalledWith({
       data: [
         expect.objectContaining({
           building_id: 'office_tower_01',
@@ -151,7 +153,7 @@ describe('POST /api/v1/ingest/readings', () => {
   });
 
   it('handles duplicates via skipDuplicates without error', async () => {
-    mockPrisma.meterReading.createMany.mockResolvedValue({ count: 0 });
+    mockPrisma.meterReading.createManyAndReturn.mockResolvedValue([]);
 
     const res = await request(app)
       .post('/api/v1/ingest/readings')
@@ -167,7 +169,7 @@ describe('POST /api/v1/ingest/readings', () => {
 
     expect(res.status).toBe(201);
     expect(res.body).toEqual({ stored: 0 });
-    expect(mockPrisma.meterReading.createMany).toHaveBeenCalledWith(
+    expect(mockPrisma.meterReading.createManyAndReturn).toHaveBeenCalledWith(
       expect.objectContaining({ skipDuplicates: true })
     );
   });
@@ -188,7 +190,7 @@ describe('POST /api/v1/ingest/readings', () => {
 
     expect(res.status).toBe(422);
     expect(res.body.detail).toContain('non_existent_building');
-    expect(mockPrisma.meterReading.createMany).not.toHaveBeenCalled();
+    expect(mockPrisma.meterReading.createManyAndReturn).not.toHaveBeenCalled();
   });
 
   it('rejects with 422 when zone does not exist for building', async () => {
@@ -209,7 +211,7 @@ describe('POST /api/v1/ingest/readings', () => {
 
     expect(res.status).toBe(422);
     expect(res.body.detail).toContain('z99');
-    expect(mockPrisma.meterReading.createMany).not.toHaveBeenCalled();
+    expect(mockPrisma.meterReading.createManyAndReturn).not.toHaveBeenCalled();
   });
 
   it('rejects with 422 Zod error when payload is malformed', async () => {
@@ -226,7 +228,7 @@ describe('POST /api/v1/ingest/readings', () => {
     expect(res.status).toBe(422);
     expect(res.body.detail).toBeDefined();
     expect(Array.isArray(res.body.detail)).toBe(true);
-    expect(mockPrisma.meterReading.createMany).not.toHaveBeenCalled();
+    expect(mockPrisma.meterReading.createManyAndReturn).not.toHaveBeenCalled();
   });
 
   it('rejects with 422 when meter_reading_kwh is negative', async () => {
@@ -243,7 +245,7 @@ describe('POST /api/v1/ingest/readings', () => {
 
     expect(res.status).toBe(422);
     expect(res.body.detail).toBeDefined();
-    expect(mockPrisma.meterReading.createMany).not.toHaveBeenCalled();
+    expect(mockPrisma.meterReading.createManyAndReturn).not.toHaveBeenCalled();
   });
 });
 

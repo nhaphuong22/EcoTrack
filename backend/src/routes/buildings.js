@@ -1,17 +1,19 @@
 const express = require('express');
 const { z } = require('zod');
 const buildingService = require('../services/buildingService');
-const requireRole = require('../middleware/requireRole');
+const { requireRole } = require('../middleware/requireUser');
 
 const router = express.Router();
 
 const BuildingCreateSchema = z.object({
   id: z.string().min(1).max(50),
   name: z.string().min(1).max(100),
-  building_type: z.string().default('Office'),
+  building_type: z.string().min(1).max(50).default('Office'),
   total_area_sqm: z.number().positive().optional().nullable(),
   location: z.string().max(100).optional().nullable(),
-  timezone: z.string().default('UTC'),
+  timezone: z.string().max(50).refine((value) => {
+    try { new Intl.DateTimeFormat('en', { timeZone: value }); return true; } catch { return false; }
+  }, 'Invalid timezone').default('UTC'),
 });
 
 // GET /api/v1/buildings
@@ -59,8 +61,11 @@ router.post('/', requireRole('ADMIN'), async (req, res, next) => {
 // GET /api/v1/buildings/:id/history
 router.get('/:id/history', async (req, res, next) => {
   try {
-    const limit = parseInt(req.query.limit || '168', 10);
-    const history = await buildingService.getBuildingHistory(req.params.id, Math.min(Math.max(limit, 1), 1000));
+    const query = z.object({
+      limit: z.coerce.number().int().min(1).max(1000).default(168),
+      zone_id: z.string().min(1).max(50).optional(),
+    }).parse(req.query);
+    const history = await buildingService.getBuildingHistory(req.params.id, query.limit, query.zone_id ?? null);
     if (!history) {
       return res.status(404).json({
         detail: `Building with id '${req.params.id}' not found.`,

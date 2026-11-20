@@ -1,13 +1,13 @@
 const express = require('express');
 const { z } = require('zod');
 const { updateAnomalyStatus, listAnomalies } = require('../services/anomalyService');
-const requireRole = require('../middleware/requireRole');
+const { requireRole } = require('../middleware/requireUser');
 
 const router = express.Router();
 
 const StatusUpdateSchema = z.object({
   status: z.enum(['OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'IGNORED']),
-  note: z.string().optional().nullable(),
+  note: z.string().max(4000).optional().nullable(),
 });
 
 // GET /api/v1/anomalies/events

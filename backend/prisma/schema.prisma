@@ -20,6 +20,9 @@ model Building {
   anomaly_events AnomalyEvent[]
   conversations  Conversation[]
   zones          Zone[]
+  units          Unit[]
+  meters         Meter[]
+  staff          BuildingStaff[]
 
   @@map("buildings")
 }
@@ -30,6 +33,9 @@ model Zone {
   floor       Int      @default(1)
   name        String   @db.VarChar(100)
   created_at  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  unit_id     String?  @db.Uuid
+  unit        Unit?    @relation(fields: [unit_id], references: [id], onDelete: Restrict)
+  meter       Meter?
 
   building       Building       @relation(fields: [building_id], references: [id], onDelete: Cascade)
   meter_readings MeterReading[]
@@ -47,6 +53,8 @@ model MeterReading {
   outdoor_temperature_c Float?   @map("outdoor_temperature_c")
   relative_humidity_pct Float?   @map("relative_humidity_pct")
   recorded_at           DateTime @default(now()) @map("recorded_at") @db.Timestamptz
+  meter_id              String?  @db.VarChar(50)
+  meter                 Meter?   @relation(fields: [meter_id], references: [id], onDelete: Restrict)
 
   building Building @relation(fields: [building_id], references: [id], onDelete: Cascade)
   zone     Zone?    @relation(fields: [zone_id], references: [id], onDelete: Cascade)
@@ -56,6 +64,7 @@ model MeterReading {
   @@index([building_id], map: "ix_meter_readings_building_id")
   @@index([zone_id], map: "ix_meter_readings_zone_id")
   @@index([timestamp], map: "ix_meter_readings_timestamp")
+  @@unique([meter_id, timestamp])
   @@map("meter_readings")
 }
 
@@ -69,6 +78,10 @@ model AnomalyEvent {
   suggested_action String?  @map("suggested_action") @db.Text
   status           String   @default("OPEN") @db.VarChar(20)
   detected_at      DateTime @default(now()) @map("detected_at") @db.Timestamptz
+  snapshot         Json?
+  status_history   Json     @default("[]")
+  meter_id         String?  @db.VarChar(50)
+  meter            Meter?   @relation(fields: [meter_id], references: [id], onDelete: Restrict)
 
   building Building @relation(fields: [building_id], references: [id], onDelete: Cascade)
 
@@ -86,6 +99,8 @@ model Conversation {
   role        String   @db.VarChar(20)
   message     String   @db.Text
   created_at  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  chat_id     String?  @db.Uuid
+  chat        ChatSession? @relation(fields: [chat_id], references: [id], onDelete: Cascade)
 
   building Building? @relation(fields: [building_id], references: [id], onDelete: Cascade)
 
@@ -96,29 +111,147 @@ model Conversation {
 }
 
 model User {
-  id            String   @id @default(uuid()) @db.VarChar(50)
-  email         String   @unique @db.VarChar(100)
-  password_hash String   @map("password_hash") @db.VarChar(255)
-  name          String   @db.VarChar(100)
-  role          String   @default("TECHNICIAN") @db.VarChar(20)
-  created_at    DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  refresh_tokens RefreshToken[]
-
+  id                String @id @default(uuid()) @db.Uuid
+  email             String @unique @db.VarChar(254)
+  name              String @db.VarChar(100)
+  password_hash     String? @db.Text
+  google_sub        String? @unique @db.VarChar(255)
+  active            Boolean @default(true)
+  is_platform_admin Boolean @default(false)
+  created_at        DateTime @default(now()) @db.Timestamptz
+  sessions          AuthSession[]
+  memberships       HouseholdMember[]
+  staff             BuildingStaff[]
+  chats             ChatSession[]
+  invitations       Invitation[]
+  oauth_flows       OAuthFlow[]
   @@map("users")
 }
 
-model RefreshToken {
-  id         String    @id @default(uuid()) @db.VarChar(50)
-  user_id    String    @map("user_id") @db.VarChar(50)
-  token_hash String    @unique @map("token_hash") @db.VarChar(255)
-  expires_at DateTime  @map("expires_at") @db.Timestamptz
-  revoked_at DateTime? @map("revoked_at") @db.Timestamptz
-  created_at DateTime  @default(now()) @map("created_at") @db.Timestamptz
+model OAuthFlow {
+  state_hash    String @id @db.VarChar(64)
+  browser_hash  String @db.VarChar(64)
+  nonce         String @db.VarChar(64)
+  code_verifier String @db.VarChar(128)
+  user_id       String? @db.Uuid
+  expires_at    DateTime @db.Timestamptz
+  user          User? @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  @@index([expires_at])
+  @@map("oauth_flows")
+}
 
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+model AuthSession {
+  id         String @id @default(uuid()) @db.Uuid
+  user_id    String @db.Uuid
+  token_hash String @unique @db.VarChar(64)
+  expires_at DateTime @db.Timestamptz
+  created_at DateTime @default(now()) @db.Timestamptz
+  user       User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  @@index([user_id])
+  @@map("auth_sessions")
+}
 
-  @@index([user_id], map: "ix_refresh_tokens_user_id")
-  @@index([token_hash], map: "ix_refresh_tokens_token_hash")
-  @@map("refresh_tokens")
+model Unit {
+  id          String @id @default(uuid()) @db.Uuid
+  building_id String @db.VarChar(50)
+  code        String @db.VarChar(30)
+  floor       Int @default(1)
+  active      Boolean @default(true)
+  building    Building @relation(fields: [building_id], references: [id], onDelete: Restrict)
+  households  Household[]
+  zones       Zone[]
+  meters      Meter[]
+  @@unique([building_id, code])
+  @@map("units")
+}
+
+model Household {
+  id         String @id @default(uuid()) @db.Uuid
+  unit_id    String @db.Uuid
+  name       String @db.VarChar(100)
+  starts_at  DateTime @default(now()) @db.Timestamptz
+  ends_at    DateTime? @db.Timestamptz
+  unit       Unit @relation(fields: [unit_id], references: [id], onDelete: Restrict)
+  members    HouseholdMember[]
+  invitations Invitation[]
+  @@index([unit_id])
+  @@map("households")
+}
+
+model HouseholdMember {
+  id           String @id @default(uuid()) @db.Uuid
+  household_id String @db.Uuid
+  user_id      String @db.Uuid
+  role         String @default("MEMBER") @db.VarChar(20)
+  starts_at    DateTime @default(now()) @db.Timestamptz
+  ends_at      DateTime? @db.Timestamptz
+  household    Household @relation(fields: [household_id], references: [id], onDelete: Restrict)
+  user         User @relation(fields: [user_id], references: [id], onDelete: Restrict)
+  @@index([household_id, user_id])
+  @@index([user_id])
+  @@map("household_members")
+}
+
+model BuildingStaff {
+  id          String @id @default(uuid()) @db.Uuid
+  building_id String @db.VarChar(50)
+  user_id     String @db.Uuid
+  role        String @default("MANAGER") @db.VarChar(20)
+  building    Building @relation(fields: [building_id], references: [id], onDelete: Restrict)
+  user        User @relation(fields: [user_id], references: [id], onDelete: Restrict)
+  @@unique([building_id, user_id])
+  @@index([user_id])
+  @@map("building_staff")
+}
+
+model Meter {
+  id          String @id @db.VarChar(50)
+  building_id String @db.VarChar(50)
+  unit_id     String? @db.Uuid
+  zone_id     String? @unique @db.VarChar(50)
+  name        String @db.VarChar(100)
+  scope       String @db.VarChar(20)
+  interval_seconds Int @default(3600)
+  building    Building @relation(fields: [building_id], references: [id], onDelete: Restrict)
+  unit        Unit? @relation(fields: [unit_id], references: [id], onDelete: Restrict)
+  zone        Zone? @relation(fields: [zone_id], references: [id], onDelete: Restrict)
+  readings    MeterReading[]
+  anomalies   AnomalyEvent[]
+  @@index([building_id, scope])
+  @@index([unit_id])
+  @@map("meters")
+}
+
+model Invitation {
+  id           String @id @default(uuid()) @db.Uuid
+  household_id String @db.Uuid
+  email        String @db.VarChar(254)
+  token_hash   String @unique @db.VarChar(64)
+  role         String @default("MEMBER") @db.VarChar(20)
+  created_by   String @db.Uuid
+  expires_at   DateTime @db.Timestamptz
+  accepted_at  DateTime? @db.Timestamptz
+  // Delivery bookkeeping for the invitation email. NULL email_sent_at means the
+  // message never left the server, so the operator must share the code by hand.
+  email_sent_at    DateTime? @db.Timestamptz
+  email_attempts   Int @default(0)
+  email_last_error String? @db.VarChar(300)
+  household    Household @relation(fields: [household_id], references: [id], onDelete: Restrict)
+  creator      User @relation(fields: [created_by], references: [id], onDelete: Restrict)
+  // Reinviting the same address looks up its outstanding invitations.
+  @@index([household_id, email])
+  @@map("invitations")
+}
+
+model ChatSession {
+  id           String @id @default(uuid()) @db.Uuid
+  user_id      String @db.Uuid
+  building_id  String @db.VarChar(50)
+  household_id String? @db.Uuid
+  scope        String @db.VarChar(20)
+  created_at   DateTime @default(now()) @db.Timestamptz
+  user         User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  messages     Conversation[]
+  @@index([user_id, created_at])
+  @@map("chat_sessions")
 }

@@ -10,8 +10,8 @@ export default function SystemStatus({ pollIntervalMs = 30000 }) {
       return {
         text: 'Không xác định',
         state: 'unknown',
-        colorClass: 'text-amber-400',
-        dotClass: 'bg-amber-400',
+        colorClass: 'text-warn',
+        dotClass: 'bg-warn-fill',
       };
     }
 
@@ -25,8 +25,8 @@ export default function SystemStatus({ pollIntervalMs = 30000 }) {
         return {
           text: isOk ? 'Đang chạy' : 'Không khả dụng',
           state: isOk ? 'healthy' : 'unavailable',
-          colorClass: isOk ? 'text-emerald-400' : 'text-rose-400',
-          dotClass: isOk ? 'bg-emerald-400' : 'bg-rose-400',
+          colorClass: isOk ? 'text-ok' : 'text-crit',
+          dotClass: isOk ? 'bg-ok' : 'bg-crit',
         };
       }
       case 'isolation_forest': {
@@ -34,8 +34,8 @@ export default function SystemStatus({ pollIntervalMs = 30000 }) {
         return {
           text: isOk ? 'Đang chạy' : 'Không khả dụng',
           state: isOk ? 'healthy' : 'unavailable',
-          colorClass: isOk ? 'text-emerald-400' : 'text-rose-400',
-          dotClass: isOk ? 'bg-emerald-400' : 'bg-rose-400',
+          colorClass: isOk ? 'text-ok' : 'text-crit',
+          dotClass: isOk ? 'bg-ok' : 'bg-crit',
         };
       }
       case 'copilot': {
@@ -43,8 +43,8 @@ export default function SystemStatus({ pollIntervalMs = 30000 }) {
         return {
           text: isOk ? `Sẵn sàng (${copilotEngine})` : 'Không khả dụng',
           state: isOk ? 'healthy' : 'unavailable',
-          colorClass: isOk ? 'text-emerald-400' : 'text-rose-400',
-          dotClass: isOk ? 'bg-emerald-400' : 'bg-rose-400',
+          colorClass: isOk ? 'text-ok' : 'text-crit',
+          dotClass: isOk ? 'bg-ok' : 'bg-crit',
         };
       }
       case 'database': {
@@ -52,8 +52,8 @@ export default function SystemStatus({ pollIntervalMs = 30000 }) {
         return {
           text: isOk ? 'Đồng bộ' : 'Mất kết nối',
           state: isOk ? 'healthy' : 'unavailable',
-          colorClass: isOk ? 'text-emerald-400' : 'text-rose-400',
-          dotClass: isOk ? 'bg-emerald-400' : 'bg-rose-400',
+          colorClass: isOk ? 'text-ok' : 'text-crit',
+          dotClass: isOk ? 'bg-ok' : 'bg-crit',
         };
       }
       case 'ai_service': {
@@ -61,16 +61,16 @@ export default function SystemStatus({ pollIntervalMs = 30000 }) {
         return {
           text: isOk ? 'Trực tuyến' : 'Ngoại tuyến',
           state: isOk ? 'healthy' : 'unavailable',
-          colorClass: isOk ? 'text-emerald-400' : 'text-rose-400',
-          dotClass: isOk ? 'bg-emerald-400' : 'bg-rose-400',
+          colorClass: isOk ? 'text-ok' : 'text-crit',
+          dotClass: isOk ? 'bg-ok' : 'bg-crit',
         };
       }
       default:
         return {
           text: 'Không xác định',
           state: 'unknown',
-          colorClass: 'text-slate-400',
-          dotClass: 'bg-slate-400',
+          colorClass: 'text-muted',
+          dotClass: 'bg-faint',
         };
     }
   };
@@ -84,52 +84,45 @@ export default function SystemStatus({ pollIntervalMs = 30000 }) {
   ];
 
   return (
-    <div
-      id="system-status-panel"
-      className="rounded-2xl border border-slate-700 bg-slate-800/60 p-5 space-y-4 backdrop-blur-sm shadow-xl"
-    >
-      <div className="flex items-center justify-between border-b border-slate-700/60 pb-3">
+    <section id="system-status-panel" className="panel" aria-label="Trạng thái hệ thống">
+      <div className="panel-head">
         <div className="flex items-center gap-2">
-          <Activity size={16} className="text-emerald-400" />
-          <h3 className="font-semibold text-white">Trạng thái hệ thống</h3>
+          <Activity size={16} className="text-muted" aria-hidden="true" />
+          <h3 className="panel-title">Trạng thái hệ thống</h3>
         </div>
         <button
           onClick={refetch}
           disabled={loading}
-          className="text-slate-400 hover:text-white transition p-1 rounded-md"
+          className="btn btn-quiet btn-sm px-2"
           title="Làm mới trạng thái"
           aria-label="Làm mới trạng thái hệ thống"
         >
-          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} aria-hidden="true" />
         </button>
       </div>
 
-      <div className="space-y-3">
+      <ul className="divide-y divide-line">
         {components.map((c) => {
           const status = getComponentStatus(c.key);
           return (
-            <div
+            <li
               key={c.key}
               id={c.id}
-              className="flex items-center justify-between text-sm py-0.5"
+              className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm"
             >
-              <span className="text-slate-400 font-normal">{c.label}</span>
-              <span className={`flex items-center gap-1.5 font-medium ${status.colorClass}`}>
-                <span
-                  className={`h-2 w-2 rounded-full ${status.dotClass} ${
-                    status.state === 'healthy' ? 'animate-pulse' : ''
-                  }`}
-                />
+              <span className="text-ink-2">{c.label}</span>
+              <span className={`flex items-center gap-2 font-semibold ${status.colorClass}`}>
+                <span className={`h-2 w-2 rounded-full ${status.dotClass}`} aria-hidden="true" />
                 <span data-testid={`${c.key}-status-text`}>{status.text}</span>
               </span>
-            </div>
+            </li>
           );
         })}
-      </div>
+      </ul>
 
-      <div className="pt-2 border-t border-slate-800 text-[11px] text-slate-500 flex items-center justify-between">
+      <div className="flex items-center justify-between border-t border-line px-4 py-2.5 text-xs text-muted">
         <span>Chu kỳ kiểm tra: 30s</span>
-        <span className="font-mono">
+        <span className="num">
           {healthData?.timestamp
             ? new Date(healthData.timestamp).toLocaleTimeString('vi-VN')
             : isUnknown
@@ -137,6 +130,6 @@ export default function SystemStatus({ pollIntervalMs = 30000 }) {
             : 'Đang tải...'}
         </span>
       </div>
-    </div>
+    </section>
   );
 }

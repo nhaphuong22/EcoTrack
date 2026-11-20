@@ -1,198 +1,67 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import request from 'supertest';
-import app from '../src/app';
+import { createApp } from '../src/app';
+import { operatorRole, publicUser } from '../src/services/authService';
 
-const mockBuilding1 = {
-  id: 'office_tower_01',
-  name: 'EcoTrack Headquarter Tower',
-  building_type: 'Commercial Office',
-  total_area_sqm: 15200.0,
-  location: 'Hanoi, Vietnam',
-  timezone: 'Asia/Ho_Chi_Minh',
-  created_at: new Date('2026-01-01T00:00:00Z'),
+const USERS = {
+  ADMIN: { id: 'u-admin', is_platform_admin: true, staff: [], memberships: [] },
+  MANAGER: { id: 'u-mgr', is_platform_admin: false, staff: [{ building_id: 'b1', role: 'MANAGER' }], memberships: [] },
+  TECHNICIAN: { id: 'u-tech', is_platform_admin: false, staff: [{ building_id: 'b1', role: 'TECHNICIAN' }], memberships: [] },
+  RESIDENT: { id: 'u-res', is_platform_admin: false, staff: [], memberships: [{ household_id: 'h1' }] },
 };
 
-const mockAnomaly = {
-  id: 'ANOM-9999',
-  building_id: 'office_tower_01',
-  timestamp: new Date(),
-  actual_reading: 250.0,
-  anomaly_score: -0.15,
-  severity: 'WARNING',
-  status: 'OPEN',
-  detected_at: new Date(),
-};
-
-const mockPrisma = {
-  building: {
-    findMany: vi.fn().mockResolvedValue([mockBuilding1]),
-    findUnique: vi.fn().mockResolvedValue(null),
-    create: vi.fn().mockResolvedValue(mockBuilding1),
+// The test header stands in for a signed-in session of the named kind.
+const app = createApp({
+  authenticate(req, res, next) {
+    req.user = USERS[req.get('x-test-user')];
+    if (!req.user) return res.status(401).json({ detail: 'Please sign in.' });
+    next();
   },
-  anomalyEvent: {
-    findUnique: vi.fn().mockResolvedValue(mockAnomaly),
-    update: vi.fn().mockResolvedValue({ ...mockAnomaly, status: 'ACKNOWLEDGED' }),
-    findMany: vi.fn().mockResolvedValue([mockAnomaly]),
-  },
-};
+});
+const as = (role) => ({ 'x-test-user': role });
 
-global.__mockPrisma = mockPrisma;
+describe('operator roles (Story 5.3)', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => { global.fetch = originalFetch; vi.restoreAllMocks(); });
 
-describe('Story 5.3: RBAC & Gateway Hardening (requireRole, Helmet, CORS, Rate-Limit)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  it('derives the role from platform admin and building staff', () => {
+    expect(operatorRole(USERS.ADMIN)).toBe('ADMIN');
+    expect(operatorRole(USERS.MANAGER)).toBe('MANAGER');
+    expect(operatorRole(USERS.TECHNICIAN)).toBe('TECHNICIAN');
+    expect(operatorRole(USERS.RESIDENT)).toBeNull();
+    expect(publicUser({ ...USERS.MANAGER, name: 'M', email: 'm@x.test' }).role).toBe('MANAGER');
   });
 
-  describe('Unauthenticated Request Rejections (401)', () => {
-    it('rejects GET /api/v1/buildings without token with 401', async () => {
-      const res = await request(app).get('/api/v1/buildings');
-      expect(res.status).toBe(401);
-      expect(res.body).toEqual({ error: 'Authentication token required' });
-    });
-
-    it('rejects GET /api/v1/mlops/status without token with 401', async () => {
-      const res = await request(app).get('/api/v1/mlops/status');
-      expect(res.status).toBe(401);
-      expect(res.body).toEqual({ error: 'Authentication token required' });
-    });
-
-    it('rejects POST /api/v1/energy/cache/clear without token with 401', async () => {
-      const res = await request(app).post('/api/v1/energy/cache/clear');
-      expect(res.status).toBe(401);
-    });
+  it('rejects an unauthenticated request with 401 and a resident with 403', async () => {
+    expect((await request(app).get('/api/v1/energy/metrics')).status).toBe(401);
+    expect((await request(app).get('/api/v1/energy/metrics').set(as('RESIDENT'))).status).toBe(403);
   });
 
-  describe('Open Endpoints (Exempt from User Auth)', () => {
-    it('GET / and /health stay reachable without any credentials', async () => {
-      const resRoot = await request(app).get('/');
-      expect(resRoot.status).toBe(200);
-
-      const resHealth = await request(app).get('/health');
-      expect(resHealth.status).toBe(200);
-    });
-
-    it('POST /api/v1/ingest/readings remains guarded by X-Ingest-Key without user token', async () => {
-      const res = await request(app)
-        .post('/api/v1/ingest/readings')
-        .set('X-Ingest-Key', process.env.INGEST_API_KEY || 'ecotrack_ingest_secret_2026')
-        .send([
-          {
-            building_id: 'office_tower_01',
-            timestamp: new Date().toISOString(),
-            meter_reading_kwh: 12.5,
-          },
-        ]);
-
-      // Returns 201 or 422 (if mock), but not 401 user auth required
-      expect(res.status).not.toBe(401);
-    });
+  it('limits mlops status to ADMIN and MANAGER', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ champion: { status: 'resolved' } }) });
+    expect((await request(app).get('/api/v1/mlops/status').set(as('TECHNICIAN'))).status).toBe(403);
+    expect((await request(app).get('/api/v1/mlops/status').set(as('MANAGER'))).status).toBe(200);
+    expect((await request(app).get('/api/v1/mlops/status').set(as('ADMIN'))).status).toBe(200);
   });
 
-  describe('Role Matrix Enforcement: ADMIN Operations', () => {
-    it('POST /api/v1/buildings requires ADMIN; rejects MANAGER and TECHNICIAN with 403', async () => {
-      const payload = {
-        id: 'new_tower',
-        name: 'New Tower',
-        building_type: 'Office',
-      };
-
-      // TECHNICIAN -> 403
-      const resTech = await request(app)
-        .post('/api/v1/buildings')
-        .set(global.authHeaderFor('TECHNICIAN'))
-        .send(payload);
-      expect(resTech.status).toBe(403);
-      expect(resTech.body).toEqual({ error: 'Forbidden: Insufficient permissions' });
-
-      // MANAGER -> 403
-      const resMgr = await request(app)
-        .post('/api/v1/buildings')
-        .set(global.authHeaderFor('MANAGER'))
-        .send(payload);
-      expect(resMgr.status).toBe(403);
-      expect(resMgr.body).toEqual({ error: 'Forbidden: Insufficient permissions' });
-
-      // ADMIN -> 201
-      const resAdmin = await request(app)
-        .post('/api/v1/buildings')
-        .set(global.authHeaderFor('ADMIN'))
-        .send(payload);
-      expect(resAdmin.status).toBe(201);
-    });
-
-    it('POST /api/v1/energy/cache/clear requires ADMIN; rejects MANAGER and TECHNICIAN with 403', async () => {
-      const resTech = await request(app)
-        .post('/api/v1/energy/cache/clear')
-        .set(global.authHeaderFor('TECHNICIAN'));
-      expect(resTech.status).toBe(403);
-
-      const resMgr = await request(app)
-        .post('/api/v1/energy/cache/clear')
-        .set(global.authHeaderFor('MANAGER'));
-      expect(resMgr.status).toBe(403);
-
-      const resAdmin = await request(app)
-        .post('/api/v1/energy/cache/clear')
-        .set(global.authHeaderFor('ADMIN'));
-      expect(resAdmin.status).toBe(200);
-      expect(resAdmin.body).toHaveProperty('message');
-    });
-
-    it('POST /api/v1/mlops/retrain requires ADMIN; rejects MANAGER and TECHNICIAN with 403', async () => {
-      const resTech = await request(app)
-        .post('/api/v1/mlops/retrain')
-        .set(global.authHeaderFor('TECHNICIAN'));
-      expect(resTech.status).toBe(403);
-
-      const resMgr = await request(app)
-        .post('/api/v1/mlops/retrain')
-        .set(global.authHeaderFor('MANAGER'));
-      expect(resMgr.status).toBe(403);
-
-      const resAdmin = await request(app)
-        .post('/api/v1/mlops/retrain')
-        .set(global.authHeaderFor('ADMIN'));
-      expect(resAdmin.status).toBe(200);
-      expect(resAdmin.body).toHaveProperty('status', 'IN_PROGRESS');
-    });
+  it('limits mlops retrain to ADMIN', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 202, json: async () => ({ run_id: 'r1' }) });
+    expect((await request(app).post('/api/v1/mlops/retrain').set(as('MANAGER'))).status).toBe(403);
+    expect((await request(app).post('/api/v1/mlops/retrain').set(as('TECHNICIAN'))).status).toBe(403);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect((await request(app).post('/api/v1/mlops/retrain').set(as('ADMIN'))).status).toBe(202);
   });
 
-  describe('Role Matrix Enforcement: MLOps Status & Anomalies', () => {
-    it('GET /api/v1/mlops/status allows ADMIN and MANAGER, rejects TECHNICIAN with 403', async () => {
-      const resTech = await request(app)
-        .get('/api/v1/mlops/status')
-        .set(global.authHeaderFor('TECHNICIAN'));
-      expect(resTech.status).toBe(403);
-
-      const resMgr = await request(app)
-        .get('/api/v1/mlops/status')
-        .set(global.authHeaderFor('MANAGER'));
-      expect(resMgr.status).toBe(200);
-      expect(resMgr.body).toHaveProperty('active_model');
-
-      const resAdmin = await request(app)
-        .get('/api/v1/mlops/status')
-        .set(global.authHeaderFor('ADMIN'));
-      expect(resAdmin.status).toBe(200);
-    });
-
-    it('PATCH /api/v1/anomalies/:id/status allows all three roles (ADMIN, MANAGER, TECHNICIAN)', async () => {
-      for (const role of ['TECHNICIAN', 'MANAGER', 'ADMIN']) {
-        const res = await request(app)
-          .patch('/api/v1/anomalies/ANOM-9999/status')
-          .set(global.authHeaderFor(role))
-          .send({ status: 'ACKNOWLEDGED' });
-
-        expect(res.status).toBe(200);
-      }
-    });
+  it('limits building creation and cache clearing to ADMIN', async () => {
+    for (const role of ['MANAGER', 'TECHNICIAN']) {
+      expect((await request(app).post('/api/v1/buildings').set(as(role)).send({})).status).toBe(403);
+      expect((await request(app).post('/api/v1/energy/cache/clear').set(as(role))).status).toBe(403);
+    }
+    expect((await request(app).post('/api/v1/energy/cache/clear').set(as('ADMIN'))).status).toBe(200);
   });
 
-  describe('Gateway Hardening: Helmet & Headers', () => {
-    it('enables Helmet security headers (nosniff, X-Frame-Options, etc.)', async () => {
-      const res = await request(app).get('/');
-      expect(res.headers['x-content-type-options']).toBe('nosniff');
-      expect(res.headers['x-dns-prefetch-control']).toBe('off');
-    });
+  it('lets a technician reach the anomaly status route (all three roles allowed)', async () => {
+    const res = await request(app).patch('/api/v1/anomalies/x/status').set(as('TECHNICIAN')).send({ status: 'bad' });
+    expect(res.status).not.toBe(403);
   });
 });

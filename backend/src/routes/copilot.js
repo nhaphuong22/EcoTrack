@@ -2,18 +2,20 @@ const express = require('express');
 const { z } = require('zod');
 const { callAIService, AI_SERVICE_URL } = require('../utils/aiClient');
 const prisma = require('../db');
+const { randomUUID } = require('crypto');
 
 const router = express.Router();
 
 const ChatMessageSchema = z.object({
-  role: z.string(),
-  content: z.string(),
+  role: z.enum(['user', 'assistant']),
+  content: z.string().max(20000),
 });
 
 const CopilotChatSchema = z.object({
-  message: z.string().min(1),
-  building_id: z.string().default('office_tower_01'),
-  history: z.array(ChatMessageSchema).default([]),
+  message: z.string().min(1).max(20000),
+  building_id: z.string().min(1).max(50).default('office_tower_01'),
+  session_id: z.string().uuid().optional(),
+  history: z.array(ChatMessageSchema).max(50).default([]),
 });
 
 // POST /api/v1/copilot/chat
@@ -27,9 +29,10 @@ router.post('/chat', async (req, res, next) => {
       body,
     });
 
-    // Asynchronously record user and assistant messages into PostgreSQL conversations
+    const sessionId = body.session_id || randomUUID();
+    let conversationSaved = false;
+    // Recording is best-effort; expose its result instead of silently losing history.
     try {
-      const sessionId = `sess_${body.building_id}_${new Date().toISOString().slice(0, 10)}`;
       await prisma.conversation.createMany({
         data: [
           {
@@ -46,11 +49,12 @@ router.post('/chat', async (req, res, next) => {
           },
         ],
       });
+      conversationSaved = true;
     } catch (dbErr) {
       console.warn('Could not record conversation in DB:', dbErr.message);
     }
 
-    res.json(aiResponse);
+    res.json({ ...aiResponse, session_id: sessionId, conversation_saved: conversationSaved });
   } catch (err) {
     next(err);
   }

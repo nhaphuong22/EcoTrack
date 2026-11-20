@@ -40,6 +40,7 @@ describe('App - Story 1.7 Copilot & Anomaly Context Integration', () => {
       zones: [
         {
           id: 'z1',
+      building_id: 'office_tower_01',
           name: 'Phòng 101',
           floor: 1,
           latest_reading: {
@@ -225,7 +226,8 @@ describe('App - Story 1.7 Copilot & Anomaly Context Integration', () => {
       expect(api.sendCopilotMessage).toHaveBeenCalledWith(
         'Tại sao phụ tải tăng cao?',
         'office_tower_01',
-        []
+        [],
+        undefined
       );
     });
     expect(screen.getByText('Tại sao phụ tải tăng cao?')).toBeInTheDocument();
@@ -301,7 +303,8 @@ describe('App - Story 1.7 Copilot & Anomaly Context Integration', () => {
       expect(api.sendCopilotMessage).toHaveBeenCalledWith(
         expect.stringContaining('Phòng 101'),
         'office_tower_01',
-        []
+        [],
+        undefined
       );
     });
 
