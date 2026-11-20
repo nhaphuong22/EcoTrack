@@ -45,10 +45,12 @@ from src.mlops.tracking import (
     track_training_run,
 )
 from src.models.train_models import (
+    QUANTILE_FILENAME,
     XGB_FEATURE_COLUMNS,
     engineer_features,
     load_dataset,
     split_time_series_data,
+    train_quantile_forecaster,
     train_xgboost_forecaster,
 )
 
@@ -226,23 +228,28 @@ def _update_local_artifacts_atomically(
     xgb_metrics: Dict[str, Any],
     probe_X: pd.DataFrame,
     train_end_iso: str,
+    quantile_model: Any,
+    quantile_metrics: Dict[str, Any],
 ) -> None:
     """
-    Stage the challenger ``.joblib`` to a temp file, verify it loads and produces
-    finite predictions, then atomically swap both ``xgboost_forecaster.joblib``
-    and ``model_metadata.json`` (preserving existing keys such as ``isolation_forest_quality``).
+    Stage the challenger ``.joblib`` files to temp files, verify they load and produce
+    finite predictions, then atomically swap ``xgboost_forecaster.joblib``,
+    ``xgboost_quantile.joblib`` and ``model_metadata.json`` (preserving existing keys such as
+    ``isolation_forest_quality``).
     """
     models_dir.mkdir(parents=True, exist_ok=True)
     xgb_path = models_dir / "xgboost_forecaster.joblib"
     tmp_xgb = models_dir / f"xgboost_forecaster.joblib.{uuid.uuid4().hex}.tmp"
+    quantile_path = models_dir / QUANTILE_FILENAME
+    tmp_quantile = models_dir / f"{QUANTILE_FILENAME}.{uuid.uuid4().hex}.tmp"
     meta_path = models_dir / "model_metadata.json"
 
     try:
-        joblib.dump(challenger_model, tmp_xgb)
-        reloaded = joblib.load(tmp_xgb)
-        probe_pred = np.asarray(reloaded.predict(probe_X), dtype=float)
-        if probe_pred.size == 0 or not np.all(np.isfinite(probe_pred)):
-            raise ValueError("Reloaded challenger artifact produced non-finite probe predictions.")
+        for model, tmp in ((challenger_model, tmp_xgb), (quantile_model, tmp_quantile)):
+            joblib.dump(model, tmp)
+            probe_pred = np.asarray(joblib.load(tmp).predict(probe_X), dtype=float)
+            if probe_pred.size == 0 or not np.all(np.isfinite(probe_pred)):
+                raise ValueError("Reloaded challenger artifact produced non-finite probe predictions.")
 
         existing_meta: Dict[str, Any] = {}
         if meta_path.is_file():
@@ -259,15 +266,17 @@ def _update_local_artifacts_atomically(
                 "train_end_timestamp": train_end_iso,
                 "xgb_features": list(XGB_FEATURE_COLUMNS),
                 "xgboost_metrics": xgb_metrics,
+                "quantile_metrics": quantile_metrics,
             }
         )
         meta_bytes = json.dumps(existing_meta, indent=2, allow_nan=False).encode("utf-8")
 
         os.replace(tmp_xgb, xgb_path)
+        os.replace(tmp_quantile, quantile_path)
         _atomic_write_bytes(meta_path, meta_bytes)
     finally:
-        if tmp_xgb.exists():
-            tmp_xgb.unlink(missing_ok=True)
+        tmp_xgb.unlink(missing_ok=True)
+        tmp_quantile.unlink(missing_ok=True)
 
 
 def _restore_file_snapshot(target: Path, snapshot: Optional[bytes]) -> None:
@@ -287,6 +296,8 @@ def _verify_and_promote_challenger(
     test_df: pd.DataFrame,
     xgb_metrics: Dict[str, Any],
     train_end_iso: str,
+    quantile_model: Any,
+    quantile_metrics: Dict[str, Any],
     tracking_uri: Optional[str] = None,
 ) -> None:
     """
@@ -316,13 +327,16 @@ def _verify_and_promote_challenger(
 
     xgb_path = models_dir / "xgboost_forecaster.joblib"
     meta_path = models_dir / "model_metadata.json"
+    quantile_path = models_dir / QUANTILE_FILENAME
     prev_xgb = xgb_path.read_bytes() if xgb_path.is_file() else None
+    prev_quantile = quantile_path.read_bytes() if quantile_path.is_file() else None
     prev_meta = meta_path.read_bytes() if meta_path.is_file() else None
 
     alias_switched = False
     disk_updated = False
     with METADATA_LOCK, serving_frame._lock:
         try:
+            disk_updated = True  # set first: a failure mid-swap must still restore all snapshots
             _update_local_artifacts_atomically(
                 challenger_model=challenger_model,
                 models_dir=models_dir,
@@ -332,8 +346,9 @@ def _verify_and_promote_challenger(
                 xgb_metrics=xgb_metrics,
                 probe_X=probe_X,
                 train_end_iso=train_end_iso,
+                quantile_model=quantile_model,
+                quantile_metrics=quantile_metrics,
             )
-            disk_updated = True
             if use_mlflow:
                 promote_champion(challenger_version, tracking_uri=tracking_uri)
                 alias_switched = True
@@ -342,6 +357,7 @@ def _verify_and_promote_challenger(
             if disk_updated:
                 try:
                     _restore_file_snapshot(xgb_path, prev_xgb)
+                    _restore_file_snapshot(quantile_path, prev_quantile)
                     _restore_file_snapshot(meta_path, prev_meta)
                 except Exception as restore_exc:
                     logger.error("Failed to restore local model artifacts: %s", restore_exc)
@@ -412,6 +428,7 @@ def _execute_retrain_locked(
 
         train_end_iso = train_end.isoformat()
         challenger_model, xgb_metrics = _train_challenger(train_df, test_df)
+        quantile_model, quantile_metrics, _ = train_quantile_forecaster(train_df, test_df)
 
         X_holdout = test_df[XGB_FEATURE_COLUMNS]
         y_holdout = test_df["meter_reading"]
@@ -453,6 +470,7 @@ def _execute_retrain_locked(
                     "train_rows": len(train_df),
                     "test_rows": len(test_df),
                 },
+                quantile_model=quantile_model,
                 run_name=f"retrain_{trigger}",
                 tracking_uri=tracking_uri,
                 bootstrap_champion=False,
@@ -472,6 +490,8 @@ def _execute_retrain_locked(
                 test_df=test_df,
                 xgb_metrics=xgb_metrics,
                 train_end_iso=train_end_iso,
+                quantile_model=quantile_model,
+                quantile_metrics=quantile_metrics,
                 tracking_uri=tracking_uri,
             )
             outcome = "promoted"

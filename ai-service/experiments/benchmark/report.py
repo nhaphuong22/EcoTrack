@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # A non-interactive backend so charts render on a headless CI/host. Must be set
 # before pyplot is imported.
@@ -285,9 +285,11 @@ def build_results_json(
     recommendation: Dict[str, Any],
     charts: Dict[str, str],
     horizon: int,
+    coverage_df: Optional[pd.DataFrame] = None,
 ) -> Dict[str, Any]:
     """Machine-readable summary for the MLOps page (Story 4.12)."""
     return {
+        "coverage": None if coverage_df is None else coverage_df.to_dict(orient="records"),
         "generated_horizon": int(horizon),
         "models": results_df.to_dict(orient="records"),
         "by_horizon": by_horizon_df.to_dict(orient="records"),
@@ -300,6 +302,7 @@ def build_report_md(
     results_df: pd.DataFrame,
     recommendation: Dict[str, Any],
     charts: Dict[str, str],
+    coverage_df: Optional[pd.DataFrame] = None,
 ) -> str:
     """Human-readable REPORT.md with the results table, the four charts, and the pick."""
     best_1h = recommendation.get("best_at_1h", {})
@@ -315,6 +318,22 @@ def build_report_md(
     parts.append(f"![Actual vs predicted (sample week)]({charts['actual_vs_predicted']})\n")
     parts.append(f"![Absolute error by hour of day]({charts['error_by_hour']})\n")
     parts.append(f"![Error against horizon]({charts['error_vs_horizon']})\n")
+
+    if coverage_df is not None and not coverage_df.empty:
+        parts.append("## 95% interval coverage (Story 4.13)\n")
+        parts.append(
+            "Held-out 24 h recursive forecasts: learned quantile band vs the old `predicted +/- 1.96 x RMSE` band. "
+            "Horizon 0 pools all horizons. Nominal coverage is 0.95.\n"
+        )
+        wide = coverage_df.pivot(index="horizon_h", columns="method", values=["coverage", "mean_width_kwh"])
+        table = pd.DataFrame({
+            "horizon_h": wide.index,
+            "coverage_learned": wide[("coverage", "learned_quantile")].to_numpy(),
+            "coverage_fixed_rmse": wide[("coverage", "fixed_rmse")].to_numpy(),
+            "width_learned_kwh": wide[("mean_width_kwh", "learned_quantile")].to_numpy(),
+            "width_fixed_rmse_kwh": wide[("mean_width_kwh", "fixed_rmse")].to_numpy(),
+        })
+        parts.append(_markdown_table(table) + "\n")
 
     parts.append("## Recommendation\n")
     parts.append(
@@ -360,8 +379,10 @@ def generate_report(
     }
 
     recommendation = compute_recommendation(results_df, by_horizon_df)
-    results_json = build_results_json(results_df, by_horizon_df, recommendation, charts, horizon)
-    report_md = build_report_md(results_df, recommendation, charts)
+    coverage_path = Path(results_path).parent / "coverage.csv"
+    coverage_df = pd.read_csv(coverage_path) if coverage_path.is_file() else None
+    results_json = build_results_json(results_df, by_horizon_df, recommendation, charts, horizon, coverage_df)
+    report_md = build_report_md(results_df, recommendation, charts, coverage_df)
 
     report_path = out_dir / REPORT_MD
     json_path = out_dir / RESULTS_JSON

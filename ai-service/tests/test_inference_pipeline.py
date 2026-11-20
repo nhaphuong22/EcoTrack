@@ -264,3 +264,42 @@ def test_autoregressive_forecast_execution(
     assert "predicted_meter_reading" in df_fc.columns
     assert "air_temperature" in df_fc.columns
     assert (df_fc["predicted_meter_reading"] > 0).all()
+
+
+def test_quantile_bounds_match_quantile_model_on_same_feature_row(setup_test_environment):
+    """quantile_lower/upper equal quantile_model.predict on the exact row fed to the point model."""
+    models_dir = setup_test_environment["models_dir"]
+    xgb_model = joblib.load(models_dir / "xgboost_forecaster.joblib")
+    q_model = joblib.load(models_dir / "xgboost_quantile.joblib")
+    pipeline = EnergyInferencePipeline(models_dir=models_dir)
+
+    rows = []
+
+    class _Booster:
+        def __init__(self, b):
+            self._b = b
+
+        def inplace_predict(self, arr):
+            rows.append(np.array(arr, copy=True))
+            return self._b.inplace_predict(arr)
+
+    class _Q:
+        def get_booster(self):
+            return _Booster(q_model.get_booster())
+
+    ts = pd.date_range("2026-05-01", periods=48, freq="1h")
+    hist = pd.DataFrame({"timestamp": ts, "meter_reading": np.linspace(300.0, 500.0, 48)})
+    fut = pd.date_range(ts[-1] + pd.Timedelta(hours=1), periods=5, freq="1h")
+    out = pipeline.predict_forecast_autoregressive(
+        xgb_model, hist, list(fut), [26.0, 27.0, 28.0, 29.0, 30.0], quantile_model=_Q()
+    )
+
+    assert len(rows) == 5
+    for step in (0, 3):
+        expected = np.asarray(q_model.predict(pd.DataFrame(rows[step], columns=pipeline.xgb_features)))
+        expected = expected.reshape(-1)
+        assert out["quantile_lower"].iloc[step] == pytest.approx(expected[0], rel=1e-5)
+        assert out["quantile_upper"].iloc[step] == pytest.approx(expected[-1], rel=1e-5)
+    # the row for step 3 carries the model's own earlier prediction as lag_1h
+    lag_idx = pipeline.xgb_features.index("lag_1h")
+    assert rows[3][0, lag_idx] == pytest.approx(out["predicted_meter_reading"].iloc[2], abs=0.01)

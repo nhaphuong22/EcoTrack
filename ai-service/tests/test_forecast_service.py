@@ -96,23 +96,75 @@ def test_bounds_contain_prediction_and_floored():
     assert (df["lower_bound_95"] >= 0.0).all()
 
 
-def test_bounds_width_ties_to_heldout_rmse():
-    """Bounds use held-out test-split RMSE (metadata), not the in-sample residual_std=8.5."""
-    rmse = _load_rmse()
+def test_bounds_are_learned_not_fixed_rmse():
+    """Story 4.13: the band comes from the quantile model, so its width varies by hour."""
     df = predict_next_24h()
+    width = (df["upper_bound_95"] - df["lower_bound_95"]).to_numpy()
+    assert width.std() > 1e-6, "learned band should not be a constant width"
+    rmse = _load_rmse()
+    assert not np.allclose(df["upper_bound_95"] - df["predicted_kwh"], 1.96 * rmse, atol=1e-6)
 
-    # Upper bound is never floored: upper - predicted == 1.96 * rmse for every point.
-    upper_half = df["upper_bound_95"] - df["predicted_kwh"]
-    assert np.allclose(upper_half, 1.96 * rmse, atol=1e-6)
 
-    # For non-floored points, the full width is 2 * 1.96 * rmse.
-    non_floored = df[df["lower_bound_95"] > 0.0]
-    assert len(non_floored) > 0, "expected at least one non-floored lower bound"
-    width = non_floored["upper_bound_95"] - non_floored["lower_bound_95"]
-    assert np.allclose(width, 2 * 1.96 * rmse, atol=1e-6)
+def test_bounds_clamp_crossing_quantiles():
+    """lower = max(0, min(q2.5, predicted)); upper = max(q97.5, predicted)."""
+    predicted = np.array([100.0, 100.0, 5.0, 100.0])
+    q_lower = np.array([120.0, 80.0, -10.0, 90.0])  # crosses above predicted / below zero
+    q_upper = np.array([130.0, 90.0, 4.0, 150.0])  # below predicted
+    lower, upper = sf._bounds_from_quantiles(predicted, q_lower, q_upper)
+    assert lower.tolist() == [100.0, 80.0, 0.0, 90.0]
+    assert upper.tolist() == [130.0, 100.0, 5.0, 150.0]
+    lower2, upper2 = sf._bounds_from_quantiles(predicted, q_lower, q_upper, scale=2.0)
+    assert lower2.tolist() == [200.0, 160.0, 0.0, 180.0]
+    assert upper2.tolist() == [260.0, 200.0, 10.0, 300.0]
 
-    # Guard against the deprecated in-sample convention.
-    assert not np.allclose(upper_half, 1.96 * 8.5, atol=1e-6)
+
+def test_missing_quantile_artifact_raises_not_fixed_band(setup_test_environment):
+    """Point model present, quantile file absent -> ModelArtifactError, never a fixed band."""
+    models_dir = setup_test_environment["models_dir"]
+    quantile_path = models_dir / "xgboost_quantile.joblib"
+    stash = quantile_path.read_bytes()
+    quantile_path.unlink()
+    reset_serving_cache()
+    try:
+        with pytest.raises(ModelArtifactError) as exc_info:
+            predict_next_24h()
+        assert "xgboost_quantile.joblib" in str(exc_info.value)
+    finally:
+        quantile_path.write_bytes(stash)
+        reset_serving_cache()
+
+
+def test_live_series_bounds_scale_with_prediction():
+    """Live-scaled series keep 0 <= lower <= predicted <= upper."""
+    frame = get_serving_frame()
+    rows = [
+        {
+            "timestamp": row.timestamp,
+            "meter_reading_kwh": row.meter_reading_kwh * 3.0,
+            "outdoor_temperature_c": row.outdoor_temperature_c,
+        }
+        for row in frame.tail(72).itertuples()
+    ]
+    df = sf.predict_next_24h_from_series(rows)
+    assert (df["lower_bound_95"] >= 0.0).all()
+    assert (df["lower_bound_95"] <= df["predicted_kwh"]).all()
+    assert (df["predicted_kwh"] <= df["upper_bound_95"]).all()
+
+
+def test_score_timeseries_scaled_bounds_enclose_and_scale():
+    """score_timeseries_from_series with scale != 1 keeps 0 <= lower <= predicted <= upper, scaled with it."""
+    frame = get_serving_frame()
+    base = [
+        {"timestamp": r.timestamp, "meter_reading_kwh": r.meter_reading_kwh, "outdoor_temperature_c": r.outdoor_temperature_c}
+        for r in frame.tail(96).itertuples()
+    ]
+    scaled_rows = [{**r, "meter_reading_kwh": r["meter_reading_kwh"] * 3.0} for r in base]
+    ref = sf.score_timeseries_from_series(base)
+    out = sf.score_timeseries_from_series(scaled_rows)
+    assert (out["lower_bound_95"] >= 0.0).all()
+    assert (out["lower_bound_95"] <= out["predicted_kwh"] + 1e-6).all()
+    assert (out["predicted_kwh"] <= out["upper_bound_95"] + 1e-6).all()
+    assert out["upper_bound_95"].mean() > 1.5 * ref["upper_bound_95"].mean()
 
 
 def test_autoregressive_chaining_feeds_lag_1h():

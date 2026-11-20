@@ -11,6 +11,7 @@ import logging
 import shutil
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 mlflow = pytest.importorskip("mlflow")
@@ -42,6 +43,20 @@ def _tiny_model():
     return model
 
 
+def _tiny_quantile_model():
+    import xgboost as xgb
+    from src.models.train_models import QUANTILE_ALPHAS
+
+    df = engineer_features(load_dataset(FIXTURE_CSV))
+    train_df, _ = split_time_series_data(df, train_ratio=0.8)
+    model = xgb.XGBRegressor(
+        n_estimators=10, max_depth=3, objective="reg:quantileerror",
+        quantile_alpha=np.array(QUANTILE_ALPHAS), random_state=42, n_jobs=1,
+    )
+    model.fit(train_df[XGB_FEATURE_COLUMNS], train_df["meter_reading"])
+    return model
+
+
 @pytest.fixture
 def champion_store(tmp_path, monkeypatch):
     """Temp MLflow store with a bootstrapped champion; champion serving path enabled."""
@@ -59,6 +74,7 @@ def champion_store(tmp_path, monkeypatch):
         {"rmse_kwh": 10.0, "mae_kwh": 8.0},
         XGB_FEATURE_COLUMNS,
         {"dataset_rows": 1, "train_rows": 1, "test_rows": 1},
+        quantile_model=_tiny_quantile_model(),
     )
     reset_serving_cache()
     yield {"tmp": tmp_path, "artifacts": artifacts, "version": summary["version"]}
@@ -149,4 +165,24 @@ def test_broken_champion_raises_model_artifact_error(champion_store):
         _load_champion_forecaster_or_fallback(xgb_path)
     # The error names the champion version it failed to load.
     assert champion_store["version"] in str(exc_info.value)
+    reset_serving_cache()
+
+
+def test_champion_without_quantile_artifact_raises_but_status_reports_champion(tmp_path, monkeypatch):
+    """A champion run that lacks `quantile_model` -> ModelArtifactError; /status metadata still resolves."""
+    from src.data_pipeline.serving_frame import _load_champion_quantile_or_fallback
+    from src.mlops.tracking import get_champion_metadata, track_training_run
+
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{(tmp_path / 'mlflow.db').as_posix()}")
+    monkeypatch.setenv("MLFLOW_ARTIFACT_ROOT", str((tmp_path / "artifacts").as_posix()))
+    monkeypatch.delenv("ECOTRACK_DISABLE_MLFLOW", raising=False)
+    track_training_run(
+        _tiny_model(), {"n_estimators": 20}, {"rmse_kwh": 10.0}, XGB_FEATURE_COLUMNS,
+        {"dataset_rows": 1, "train_rows": 1, "test_rows": 1},
+    )
+    reset_serving_cache()
+    models_dir = Path(__import__("os").environ["ECOTRACK_MODELS_DIR"])
+    with pytest.raises(ModelArtifactError):
+        _load_champion_quantile_or_fallback(models_dir / "xgboost_quantile.joblib")
+    assert get_champion_metadata()["status"] == "resolved"
     reset_serving_cache()

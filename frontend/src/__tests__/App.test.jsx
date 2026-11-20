@@ -12,6 +12,8 @@ vi.mock('../services/api', () => ({
   fetchZones: vi.fn(),
   fetchSystemHealth: vi.fn(),
   sendCopilotMessage: vi.fn(),
+  fetchMLOpsStatus: vi.fn(),
+  triggerMLOpsRetrain: vi.fn(),
 }));
 
 // Mock recharts ResponsiveContainer to avoid jsdom layout warning
@@ -311,5 +313,45 @@ describe('App - Story 1.7 Copilot & Anomaly Context Integration', () => {
     // Drawer opens
     expect(document.querySelector('.bg-black\\/40')).toBeInTheDocument();
     expect(document.querySelector('aside')).toHaveClass('translate-x-0');
+  });
+});
+
+describe('App - Story 4.12 MLOps tab gating', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.fetchMetrics.mockResolvedValue({ total_consumption_kwh: 1, avg_consumption_kwh: 1, peak_consumption_kwh: 1, estimated_cost_usd: 1, estimated_cost_vnd: 1 });
+    api.fetchTimeSeries.mockResolvedValue({ data: [] });
+    api.fetchForecast.mockResolvedValue({ predictions: [] });
+    api.fetchAnomalies.mockResolvedValue([]);
+    api.fetchZones.mockResolvedValue({ zones: [] });
+    api.fetchSystemHealth.mockResolvedValue({ services: {}, models: {} });
+  });
+
+  const staff = (building_id, role) => ({ role, staff: [{ building_id, role }] });
+
+  it.each([
+    ['ADMIN', { role: 'ADMIN', staff: [] }, true],
+    ['MANAGER of the dashboard building', staff('office_tower_01', 'MANAGER'), true],
+    ['MANAGER of another building', staff('other_building', 'MANAGER'), false],
+    ['TECHNICIAN', staff('office_tower_01', 'TECHNICIAN'), false],
+    ['no user', null, false],
+  ])('MLOps tab for %s', async (_label, user, visible) => {
+    render(<App user={user} />);
+    await waitFor(() => expect(document.getElementById('tab-floorplan')).toBeInTheDocument());
+    expect(Boolean(document.getElementById('tab-mlops'))).toBe(visible);
+  });
+
+  it.each([
+    ['ADMIN', { role: 'ADMIN', staff: [] }, true],
+    ['MANAGER of the dashboard building', staff('office_tower_01', 'MANAGER'), false],
+  ])('opening the MLOps tab as %s shows the panel; Retrain visible: %s', async (_label, user, retrain) => {
+    api.fetchMLOpsStatus.mockResolvedValue({
+      champion: { status: 'resolved', version: '1', metrics: null },
+      drift: null, anomaly_quality: null, retrain_history: [], benchmark: null, errors: {},
+    });
+    render(<App user={user} />);
+    fireEvent.click(await screen.findByRole('tab', { name: /MLOps/ }));
+    expect(await screen.findByRole('heading', { name: 'Giám sát mô hình (MLOps)' })).toBeInTheDocument();
+    expect(Boolean(screen.queryByRole('button', { name: 'Retrain' }))).toBe(retrain);
   });
 });

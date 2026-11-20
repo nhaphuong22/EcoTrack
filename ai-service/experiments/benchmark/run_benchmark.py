@@ -18,7 +18,7 @@ from src.models.train_models import (
     load_dataset,
     split_time_series_data,
 )
-from experiments.benchmark.benchmark import DEFAULT_HORIZON, run_horizon_scoring, run_scoring
+from experiments.benchmark.benchmark import DEFAULT_HORIZON, run_horizon_scoring, run_interval_coverage, run_scoring
 from experiments.benchmark.models import BaseForecaster, get_registered_forecasters
 
 logging.basicConfig(
@@ -140,6 +140,10 @@ def execute_benchmark(
     predictions_file.parent.mkdir(parents=True, exist_ok=True)
     predictions_df.to_parquet(predictions_file, index=False)
     logger.info("Per-timestamp predictions saved to %s", predictions_file)
+
+    coverage_file = out_file.parent / "coverage.csv"
+    run_interval_coverage(train_df, test_df, horizon=horizon).to_csv(coverage_file, index=False)
+    logger.info("Interval coverage saved to %s", coverage_file)
 
     return results_df
 

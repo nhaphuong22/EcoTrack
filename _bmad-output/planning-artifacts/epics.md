@@ -1258,6 +1258,50 @@ So that I can decide when to retrain and show how the system manages itself.
 **When** the page renders
 **Then** that section shows an empty state instead of failing
 
+**Given** a signed-in user who is not a platform `ADMIN` and does not hold a `MANAGER` staff row for the building the dashboard shows (`office_tower_01` today)
+**When** they open the operations dashboard
+**Then** the MLOps tab is not rendered, and the gateway answers `GET /api/v1/mlops/status` with 403 for them (a `MANAGER` of another building is refused; this tightens Story 4.11, which allows any `MANAGER`)
+**And** the model and its status stay platform-wide, because there is one serving model and no per-building status; the building check only decides who may see it
+
+**Given** a user allowed by the rule above, with a role that is not `ADMIN`
+**When** the page renders
+**Then** the MLOps tab in the operations dashboard (`App.jsx` uses tabs, there is no router) is not rendered, and only `ADMIN` sees the "Retrain" button (matching FR40); the gateway remains the authority (`requireRole` already guards both endpoints)
+**And** `AccountPortal` passes `user.role` to the dashboard, which today receives no props, so a `TECHNICIAN` can open the dashboard but never sees the tab
+
+**Given** `champion.status` is `"fallback"`, `"unavailable"` or `"broken"`
+**When** the page renders
+**Then** a banner states the condition, `"broken"` shows the `error` text prominently and is never styled like a healthy champion, and `metrics: null` shows an empty state
+
+**Given** the response carries `errors[<section>]`
+**When** that section renders
+**Then** it shows the diagnostic as an error state, distinct from the empty state used for a plain `null`, while the other sections still render
+
+**Given** a retrain was accepted (HTTP 202 with `run_id`)
+**When** the run is in progress
+**Then** the page polls `GET /api/v1/mlops/status` every 4 seconds, keeps "Retrain" disabled, and stops polling once `retrain_history` contains an entry for that `run_id` or after a 15-minute ceiling, which shows a "still running or unknown" message
+**And** polling pauses while the browser tab is hidden and stops when the page unmounts
+
+**Given** the MLOps tab is open and no retrain is in progress
+**When** 30 seconds pass
+**Then** the page refreshes `GET /api/v1/mlops/status` quietly, so a retrain started by the scheduler (Story 4.9) appears without a manual refresh
+**And** the idle refresh pauses while the browser tab is hidden, stops when the tab is closed or unmounted, and gives way to the 4-second polling while a retrain is in progress
+
+**Given** `POST /api/v1/mlops/retrain` returns 409, 429, 502 or 504
+**When** the page handles it
+**Then** 409 shows "a retrain is already running" and starts the same polling, and 429/502/504 show the gateway's error message without disabling the button permanently
+
+**Given** the page is reloaded while a retrain is running
+**When** it loads
+**Then** a 409 on the next "Retrain" click is handled as above (no new status field is added to the backend)
+
+**Given** the drift section and the benchmark section have data
+**When** the page renders
+**Then** they are drawn with Recharts (drift signals and benchmark metric comparison), using the existing chart conventions of the dashboard
+
+**Given** the frontend test suite
+**When** the Story 4.12 tests run with the API mocked
+**Then** they cover role gating, each `champion.status`, null and `errors` sections, retrain confirm, polling start/stop (fake timers), the 15-minute ceiling, and 409/429/502/504 handling
+
 ### Story 4.13: Forecast with learned prediction intervals
 
 Scheduled after Story 4.5 (it is numbered 4.13 so that existing story keys keep their numbers).
@@ -1285,6 +1329,27 @@ So that I can judge how much to trust the forecast at a given hour.
 **Given** the quantile artifacts are missing
 **When** the endpoint is called
 **Then** it returns the same explicit `ERR_MODEL_NOT_FOUND` error as for a missing forecaster; it does not fall back to the fixed band silently
+
+**Given** a training run or a guarded retrain (Story 4.8)
+**When** it completes
+**Then** the 2.5%, 50% and 97.5% quantile models are trained in the same run and registered in the same MLflow `champion` version as the point forecaster, so promotion and rollback move all of them together
+**And** the promotion gate of Story 4.8 is unchanged and still decides on the point forecaster's error; `predicted_kwh` keeps coming from the point forecaster, and the 50% quantile is trained and reported in the evaluation only
+
+**Given** a champion version that lacks the quantile artifacts
+**When** the forecast is requested
+**Then** it returns `ERR_MODEL_NOT_FOUND` as above, and the status endpoint (Story 4.10) still reports that champion normally
+
+**Given** the learned quantiles cross or fall outside the point forecast at some hour
+**When** the response is built
+**Then** `lower_bound_95 = max(0, min(q2.5, predicted_kwh))` and `upper_bound_95 = max(q97.5, predicted_kwh)`, so the bounds always enclose `predicted_kwh` and the lower bound is never below 0
+
+**Given** the 24-hour autoregressive forecast on the held-out test split
+**When** the intervals are evaluated
+**Then** the report states the 95% coverage and mean width overall and for each horizon from 1 h to 24 h, next to the same figures for the `±1.96 × RMSE` band, and does not hide coverage below 95% at the far horizons
+
+**Given** the five places that compute `±1.96 × RMSE` in `serving_frame.py`
+**When** the story ships
+**Then** they use one shared helper that applies the learned quantiles, the tests that assert the `1.96 × RMSE` formula are replaced by tests of the new bounds, and the forecast endpoint still meets the 300 ms p95 budget (NFR3)
 
 ## Epic 5: Secure Access & RBAC
 

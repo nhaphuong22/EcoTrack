@@ -37,10 +37,10 @@ describe('operator roles (Story 5.3)', () => {
     expect((await request(app).get('/api/v1/energy/metrics').set(as('RESIDENT'))).status).toBe(403);
   });
 
-  it('limits mlops status to ADMIN and MANAGER', async () => {
+  it('limits mlops status to ADMIN and a MANAGER of the dashboard building (Story 4.12)', async () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ champion: { status: 'resolved' } }) });
     expect((await request(app).get('/api/v1/mlops/status').set(as('TECHNICIAN'))).status).toBe(403);
-    expect((await request(app).get('/api/v1/mlops/status').set(as('MANAGER'))).status).toBe(200);
+    expect((await request(app).get('/api/v1/mlops/status').set(as('MANAGER'))).status).toBe(403); // manager of b1 only
     expect((await request(app).get('/api/v1/mlops/status').set(as('ADMIN'))).status).toBe(200);
   });
 

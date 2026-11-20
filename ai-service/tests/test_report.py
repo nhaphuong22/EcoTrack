@@ -211,3 +211,20 @@ def test_run_report_cli_exits_nonzero_on_missing_artifact(tmp_path, monkeypatch)
         run_report_mod.main()
     assert exc_info.value.code == 1
     assert not (out_dir / "REPORT.md").exists(), "No partial report on missing artifact"
+
+
+def test_report_renders_coverage_section_when_artifact_present(tmp_path):
+    results_path, by_horizon_path, predictions_path = _write_artifacts(tmp_path)
+    rows = [
+        {"horizon_h": h, "method": m, "coverage": 0.9, "mean_width_kwh": 10.0 + h}
+        for h in range(0, 25)
+        for m in ("learned_quantile", "fixed_rmse")
+    ]
+    pd.DataFrame(rows).to_csv(tmp_path / "coverage.csv", index=False)
+    out_dir = tmp_path / "report"
+
+    generate_report(results_path, by_horizon_path, predictions_path, out_dir)
+
+    assert "95% interval coverage" in (out_dir / "REPORT.md").read_text(encoding="utf-8")
+    payload = json.loads((out_dir / "results.json").read_text(encoding="utf-8"))
+    assert len(payload["coverage"]) == 50

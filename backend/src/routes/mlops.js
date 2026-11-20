@@ -2,6 +2,7 @@ const express = require('express');
 const { InMemoryTTLCache } = require('../utils/cache');
 const { callAIService, AIServiceError } = require('../utils/aiClient');
 const { requireRole } = require('../middleware/requireUser');
+const { operatorRole } = require('../services/authService');
 
 const router = express.Router();
 
@@ -45,8 +46,17 @@ function sendUpstreamError(err, res, next) {
   });
 }
 
+// Same rule as the frontend tab: ADMIN, or MANAGER of the building the dashboard shows.
+const DASHBOARD_BUILDING = 'office_tower_01';
+function requireStatusViewer(req, res, next) {
+  const allowed = operatorRole(req.user) === 'ADMIN'
+    || (req.user?.staff || []).some((s) => s.role === 'MANAGER' && s.building_id === DASHBOARD_BUILDING);
+  if (!allowed) return res.status(403).json({ detail: 'Your role is not allowed to do this.' });
+  next();
+}
+
 // GET /api/v1/mlops/status
-router.get('/status', requireRole('ADMIN', 'MANAGER'), async (req, res, next) => {
+router.get('/status', requireStatusViewer, async (req, res, next) => {
   try {
     const cached = statusCache.get(STATUS_KEY);
     if (cached !== null) {

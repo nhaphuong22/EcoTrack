@@ -4,7 +4,7 @@ import AccountPortal from '../AccountPortal';
 import { accountApi } from '../services/api';
 
 vi.mock('../services/api', () => ({ API_BASE_URL: 'http://localhost:5000', accountApi: { get: vi.fn(), post: vi.fn() } }));
-vi.mock('../App', () => ({ default: () => <div>Original system dashboard</div> }));
+vi.mock('../App', () => ({ default: ({ user }) => <div data-role={user?.role}>Original system dashboard</div> }));
 const building = { id: 'office_tower_01', name: 'Demo Tower' };
 const household = { id: '11111111-1111-4111-8111-111111111111', name: 'My household', role: 'MEMBER',
   unit: { code: '101', building_id: building.id, building } };
@@ -94,7 +94,7 @@ describe('Resident account portal', () => {
     currentUser = { ...resident, households: [], is_platform_admin: true, role: 'ADMIN' };
     render(<AccountPortal />);
     fireEvent.click(await screen.findByRole('button', { name: 'Dashboard hệ thống' }));
-    expect(await screen.findByText('Original system dashboard')).toBeInTheDocument();
+    expect(await screen.findByText('Original system dashboard')).toHaveAttribute('data-role', 'ADMIN'); // user reaches the dashboard
     fireEvent.click(screen.getByRole('button', { name: 'Về cổng cư dân' }));
     expect(await screen.findByRole('button', { name: 'Dashboard hệ thống' })).toBeInTheDocument();
     expect(screen.queryByText('Original system dashboard')).not.toBeInTheDocument();

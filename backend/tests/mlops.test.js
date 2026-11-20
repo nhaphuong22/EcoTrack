@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import app from './helpers/adminApp';
+import { createApp } from '../src/app';
 import { createRequire } from 'node:module';
 
 // app.js loads the route with Node's require; import the same instance so reset() clears its state.
@@ -112,5 +113,27 @@ describe('MLOps gateway proxy', () => {
     expect(res.status).toBe(502);
     expect(res.body.upstream_status).toBe(code);
     expect(JSON.stringify(res.body)).not.toContain('secret.py');
+  });
+
+  describe('status viewer rule', () => {
+    const asUser = (user) => createApp({ authenticate(req, res, next) { req.user = user; next(); } });
+    const staff = (building_id, role) => ({ id: 'u', is_platform_admin: false, memberships: [], staff: [{ building_id, role }] });
+
+    it.each([
+      ['manager of another building', staff('other_building', 'MANAGER'), 403],
+      ['technician of the dashboard building', staff('office_tower_01', 'TECHNICIAN'), 403],
+      ['manager of the dashboard building', staff('office_tower_01', 'MANAGER'), 200],
+      ['platform admin without staff rows', { id: 'u', is_platform_admin: true, memberships: [], staff: [] }, 200],
+    ])('%s gets %i', async (_name, user, code) => {
+      global.fetch = vi.fn().mockResolvedValue(upstream(200, { champion: null }));
+      expect((await request(asUser(user)).get('/api/v1/mlops/status')).status).toBe(code);
+    });
+
+    it('a manager who can view status still cannot retrain', async () => {
+      global.fetch = vi.fn();
+      const res = await request(asUser(staff('office_tower_01', 'MANAGER'))).post('/api/v1/mlops/retrain');
+      expect(res.status).toBe(403);
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
   });
 });

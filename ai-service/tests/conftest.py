@@ -14,6 +14,7 @@ from src.models.train_models import (
     save_trained_models,
     split_time_series_data,
     train_isolation_forest,
+    train_quantile_forecaster,
     train_xgboost_forecaster,
 )
 
@@ -33,6 +34,7 @@ def setup_test_environment():
     train_df, test_df = split_time_series_data(df_feat, train_ratio=0.8)
 
     xgb_model, xgb_metrics, _ = train_xgboost_forecaster(train_df, test_df)
+    quantile_model, quantile_metrics, _ = train_quantile_forecaster(train_df, test_df)
     iso_model, iso_metrics, _, _ = train_isolation_forest(train_df, test_df, contamination=0.03)
 
     metadata = {
@@ -42,6 +44,7 @@ def setup_test_environment():
         "xgb_features": XGB_FEATURE_COLUMNS,
         "iso_features": ISO_FEATURE_COLUMNS,
         "xgboost_metrics": xgb_metrics,
+        "quantile_metrics": quantile_metrics,
         "isolation_forest_metrics": iso_metrics,
     }
 
@@ -50,6 +53,7 @@ def setup_test_environment():
         iso_model=iso_model,
         output_dir=temp_models_dir,
         metadata=metadata,
+        quantile_model=quantile_model,
     )
 
     old_data_path = os.environ.get("ECOTRACK_DATA_PATH")
