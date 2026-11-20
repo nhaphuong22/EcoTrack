@@ -1,7 +1,9 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, fireEvent } from '@testing-library/react';
 import MLOpsPanel from '../components/dashboard/MLOpsPanel';
-import { canViewMLOps } from '../hooks/useMLOpsStatus';
+import { canViewMLOps, DASHBOARD_BUILDING } from '../hooks/useMLOpsStatus';
 import * as api from '../services/api';
 
 vi.mock('../services/api', () => ({
@@ -249,4 +251,17 @@ describe('MLOpsPanel - Story 4.12', () => {
       expect(screen.getByRole('button', { name: 'Retrain' })).toBeEnabled();
     },
   );
+});
+
+describe('MLOps viewer rule stays in sync with the gateway', () => {
+  it('uses the same dashboard building id as backend/src/routes/mlops.js', () => {
+    // Vitest runs from frontend/ (npm --prefix) or from the repo root.
+    const file = ['../backend', 'backend']
+      .map((dir) => resolve(process.cwd(), dir, 'src/routes/mlops.js'))
+      .find(existsSync);
+    const source = readFileSync(file, 'utf8');
+    const backend = source.match(/DASHBOARD_BUILDING = '([^']+)'/)?.[1];
+    expect(backend).toBeDefined();
+    expect(DASHBOARD_BUILDING).toBe(backend);
+  });
 });
