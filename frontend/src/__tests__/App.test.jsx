@@ -313,3 +313,29 @@ describe('App - Story 1.7 Copilot & Anomaly Context Integration', () => {
     expect(document.querySelector('aside')).toHaveClass('translate-x-0');
   });
 });
+
+describe('App - Story 4.12 MLOps tab gating', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.fetchMetrics.mockResolvedValue({ total_consumption_kwh: 1, avg_consumption_kwh: 1, peak_consumption_kwh: 1, estimated_cost_usd: 1, estimated_cost_vnd: 1 });
+    api.fetchTimeSeries.mockResolvedValue({ data: [] });
+    api.fetchForecast.mockResolvedValue({ predictions: [] });
+    api.fetchAnomalies.mockResolvedValue([]);
+    api.fetchZones.mockResolvedValue({ zones: [] });
+    api.fetchSystemHealth.mockResolvedValue({ services: {}, models: {} });
+  });
+
+  const staff = (building_id, role) => ({ role, staff: [{ building_id, role }] });
+
+  it.each([
+    ['ADMIN', { role: 'ADMIN', staff: [] }, true],
+    ['MANAGER of the dashboard building', staff('office_tower_01', 'MANAGER'), true],
+    ['MANAGER of another building', staff('other_building', 'MANAGER'), false],
+    ['TECHNICIAN', staff('office_tower_01', 'TECHNICIAN'), false],
+    ['no user', null, false],
+  ])('MLOps tab for %s', async (_label, user, visible) => {
+    render(<App user={user} />);
+    await waitFor(() => expect(document.getElementById('tab-floorplan')).toBeInTheDocument());
+    expect(Boolean(document.getElementById('tab-mlops'))).toBe(visible);
+  });
+});

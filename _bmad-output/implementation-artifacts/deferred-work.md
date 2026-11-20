@@ -46,3 +46,9 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-10-report-model-and-drift-status.md`
   summary: `anomaly_quality.merge_into_metadata()` writes `model_metadata.json` via a fixed `.json.tmp` sibling path without holding a shared metadata lock (`ai-service/src/mlops/anomaly_quality.py:126`).
   evidence: Pre-existing Story 4.7 code outside Story 4.10 diff (`blind-hunter` finding #8).
+
+## Deferred from: bmad-build review of story-4.12 (2026-11-21)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-12-monitor-the-model-as-an-admin.md`
+  summary: The dashboard building id `office_tower_01` and the MLOps viewer rule are duplicated in `backend/src/routes/mlops.js` and `frontend/src/hooks/useMLOpsStatus.js`, and no test links the two.
+  evidence: Real but small. Changing one side only gives a dead tab (UI shows it, API returns 403) or a hidden feature, while every test still passes. Fix with one shared constant or a `/auth/me` capability flag when the dashboard gets a building picker.
