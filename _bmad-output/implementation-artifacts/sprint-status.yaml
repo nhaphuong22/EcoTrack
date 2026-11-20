@@ -74,7 +74,7 @@ development_status:
   4-9-retrain-automatically-when-the-model-degrades: done
   4-10-report-model-and-drift-status: done
   4-11-expose-model-monitoring-to-admins: done
-  4-12-monitor-the-model-as-an-admin: review
+  4-12-monitor-the-model-as-an-admin: done
   4-13-forecast-with-learned-prediction-intervals: backlog
   epic-4-retrospective: optional
 
