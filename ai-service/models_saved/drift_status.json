@@ -1,0 +1,36 @@
+{
+  "checked_at": "2026-11-20T17:30:00.460305Z",
+  "drift_detected": false,
+  "triggered_signals": [],
+  "signals": {
+    "meter_reading": {
+      "ks_statistic": 0.039825913242009126,
+      "p_value": 3.614802401347481e-11,
+      "psi": 0.01606084670885407,
+      "ref_n": 14016,
+      "rec_n": 17520,
+      "insufficient_data": false
+    },
+    "air_temperature": {
+      "ks_statistic": 0.016523972602739745,
+      "p_value": 0.028145718737803915,
+      "psi": 0.002625302891903136,
+      "ref_n": 14016,
+      "rec_n": 17520,
+      "insufficient_data": false
+    }
+  },
+  "rolling_mape": {
+    "mape_percent": 4.08,
+    "window_hours": 168
+  },
+  "thresholds": {
+    "ks_pvalue": 0.05,
+    "psi": 0.2,
+    "mape_percent": 15.0
+  },
+  "retrain_triggered": false,
+  "retrain_trigger": null,
+  "retrain_run_id": null,
+  "retrain_outcome": null
+}
