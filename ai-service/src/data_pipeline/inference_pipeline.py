@@ -309,10 +309,13 @@ class EnergyInferencePipeline:
         recent_readings_df: pd.DataFrame,
         future_timestamps: Sequence[Any],
         future_temperatures: Sequence[Union[int, float]],
+        quantile_model: Any = None,
     ) -> pd.DataFrame:
         """
         Executes multi-step recursive autoregressive load forecasting using XGBoost.
         At each hourly step t, the model's prediction becomes lag_1h for step t+1.
+        When ``quantile_model`` is given, its lower/upper quantiles for the same feature row are
+        returned as ``quantile_lower`` / ``quantile_upper``.
         """
         hist = self._standardize_column_names(recent_readings_df)
         if len(hist) < 24:
@@ -374,11 +377,15 @@ class EnergyInferencePipeline:
                 pred_val = float(xgb_model.predict(pd.DataFrame(row_buf, columns=feature_names))[0])
             pred_val = round(max(0.0, pred_val), 2)
 
-            forecast_records.append({
+            record = {
                 "timestamp": current_ts.strftime("%Y-%m-%d %H:%M:%S"),
                 "predicted_meter_reading": pred_val,
                 "air_temperature": current_temp,
-            })
+            }
+            if quantile_model is not None:
+                q = np.asarray(quantile_model.get_booster().inplace_predict(row_buf), dtype=float).reshape(-1)
+                record["quantile_lower"], record["quantile_upper"] = float(q[0]), float(q[-1])
+            forecast_records.append(record)
 
             time_to_reading[current_ts] = pred_val
             hist_vals.append(pred_val)

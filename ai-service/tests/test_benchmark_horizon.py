@@ -19,9 +19,11 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 from experiments.benchmark.benchmark import (
     DEFAULT_HORIZON,
+    COVERAGE_COLUMNS,
     HORIZON_COLUMNS,
     PREDICTION_COLUMNS,
     run_horizon_scoring,
+    run_interval_coverage,
 )
 from experiments.benchmark.lstm import LSTMForecaster
 from experiments.benchmark.models import (
@@ -217,3 +219,15 @@ def test_per_horizon_determinism(sample_partitions):
             run1[col].to_numpy(), run2[col].to_numpy(),
             err_msg=f"Per-horizon {col} was not deterministic across runs",
         )
+
+
+def test_interval_coverage_reports_both_bands_per_horizon(sample_partitions):
+    """Story 4.13: coverage and mean width overall (horizon 0) and per horizon 1..24, both methods."""
+    train_df, test_df = sample_partitions
+    cov = run_interval_coverage(train_df, test_df, horizon=24)
+    assert list(cov.columns) == COVERAGE_COLUMNS
+    assert set(cov["method"]) == {"learned_quantile", "fixed_rmse"}
+    assert set(cov["horizon_h"]) == set(range(0, 25))
+    assert cov["coverage"].between(0.0, 1.0).all()
+    assert (cov["mean_width_kwh"] >= 0.0).all()
+    assert len(cov) == 2 * 25

@@ -34,4 +34,13 @@ router.post('/readings', requireApiKey('INGEST_API_KEY', 'X-Ingest-Key'), async 
   }
 });
 
+// GET /api/v1/ingest/targets: which buildings/zones the simulator should stream right now.
+router.get('/targets', requireApiKey('INGEST_API_KEY', 'X-Ingest-Key'), async (req, res, next) => {
+  try {
+    res.json({ buildings: await ingestService.listTargets() });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

@@ -114,6 +114,17 @@ def _fit_tiny_xgb(train_df: pd.DataFrame, max_depth: int = 3, scale_target: floa
     return model
 
 
+def _fit_tiny_quantile(train_df: pd.DataFrame):
+    import xgboost as xgb
+
+    model = xgb.XGBRegressor(
+        n_estimators=10, max_depth=2, objective="reg:quantileerror",
+        quantile_alpha=np.array([0.025, 0.5, 0.975]), random_state=42, n_jobs=1,
+    )
+    model.fit(train_df[XGB_FEATURE_COLUMNS], train_df["meter_reading"])
+    return model
+
+
 def test_compute_holdout_mape_filters_zeros_and_rejects_non_finite():
     y_true = np.array([0.0, 100.0, 200.0])
     y_pred = np.array([50.0, 110.0, 180.0])
@@ -139,6 +150,7 @@ def test_run_retrain_real_training_promotes_and_hot_reloads_forecast_endpoint(te
 
     # Seed a degraded champion (v1) trained on scaled-down targets.
     bad_champion = _fit_tiny_xgb(train_df, max_depth=2, scale_target=0.5)
+    seed_quantile = _fit_tiny_quantile(train_df)
     boot = track_training_run(
         model=bad_champion,
         params={"n_estimators": 15, "max_depth": 2},
@@ -146,9 +158,12 @@ def test_run_retrain_real_training_promotes_and_hot_reloads_forecast_endpoint(te
         features=list(XGB_FEATURE_COLUMNS),
         row_counts={"dataset_rows": len(df), "train_rows": len(train_df), "test_rows": len(test_df)},
         run_name="seed_weak_champion",
+        quantile_model=seed_quantile,
     )
     assert boot is not None and boot["champion_version"] == "1"
     joblib.dump(bad_champion, models_dir / "xgboost_forecaster.joblib")
+    joblib.dump(seed_quantile, models_dir / "xgboost_quantile.joblib")
+    seed_quantile_bytes = (models_dir / "xgboost_quantile.joblib").read_bytes()
 
     # Preserve Story 4.7 key inside model_metadata.json alongside existing isolation_forest keys.
     meta_path = models_dir / "model_metadata.json"
@@ -182,6 +197,12 @@ def test_run_retrain_real_training_promotes_and_hot_reloads_forecast_endpoint(te
     assert updated_meta["iso_features"] == ISO_FEATURE_COLUMNS
     assert updated_meta["train_end_timestamp"]
     assert updated_meta["xgboost_metrics"]["mape_percent"] == pytest.approx(record["challenger_mape"], abs=0.01)
+    assert 0.0 <= updated_meta["quantile_metrics"]["coverage_95"] <= 1.0
+    # Quantile file swapped with the point model, and the champion run carries a quantile_model too.
+    assert (models_dir / "xgboost_quantile.joblib").read_bytes() != seed_quantile_bytes
+    from src.mlops.tracking import load_champion_quantile_model
+
+    assert load_champion_quantile_model().predict(test_df[XGB_FEATURE_COLUMNS].iloc[:1]).shape == (1, 3)
 
     # Forecast endpoint serves the promoted champion without restarting the app.
     after_res = client.get("/internal/forecast/predict")
@@ -237,6 +258,7 @@ def test_run_retrain_rejects_equal_or_worse_challenger_and_preserves_newest_firs
     )
     rec_worse = run_retrain(trigger="manual", data_path=FIXTURE_CSV, models_dir=models_dir)
     assert rec_worse["outcome"] == "rejected"
+    assert not (models_dir / "xgboost_quantile.joblib").exists()  # rejected: no quantile file written
     assert rec_worse["challenger_mape"] > rec_worse["champion_mape"]
     _, active_version = load_champion_forecaster()
     assert active_version == "1"
@@ -265,6 +287,9 @@ def test_run_retrain_rollback_restores_disk_and_mlflow_alias_and_releases_lock(
     joblib.dump(bad_champion, xgb_path)
     orig_xgb_bytes = xgb_path.read_bytes()
     orig_meta_bytes = meta_path.read_bytes()
+    quantile_path = models_dir / "xgboost_quantile.joblib"
+    joblib.dump(_fit_tiny_quantile(train_df), quantile_path)
+    orig_quantile_bytes = quantile_path.read_bytes()
 
     # Failure 1: Missing dataset -> outcome == "failed", lock released.
     rec_missing = run_retrain(
@@ -291,6 +316,7 @@ def test_run_retrain_rollback_restores_disk_and_mlflow_alias_and_releases_lock(
     assert "MLflow alias locked" in (rec_promote_err["reason"] or "")
     assert xgb_path.read_bytes() == orig_xgb_bytes
     assert meta_path.read_bytes() == orig_meta_bytes
+    assert quantile_path.read_bytes() == orig_quantile_bytes
     assert not is_retrain_running()
 
     # Failure 3: reset_serving_cache fails AFTER promote_champion switched alias -> rolls back BOTH MLflow alias to v1 AND disk files.
@@ -301,6 +327,7 @@ def test_run_retrain_rollback_restores_disk_and_mlflow_alias_and_releases_lock(
     assert "Cache reset boom" in (rec_cache_err["reason"] or "")
     assert xgb_path.read_bytes() == orig_xgb_bytes
     assert meta_path.read_bytes() == orig_meta_bytes
+    assert quantile_path.read_bytes() == orig_quantile_bytes
     _, active_version = load_champion_forecaster()
     assert active_version == "1"
     assert not is_retrain_running()
@@ -494,7 +521,7 @@ def test_retrain_endpoint_returns_202_409_and_enforces_internal_token(temp_mlflo
 
     # Release the background thread and wait briefly for completion.
     gate.set()
-    for _ in range(50):
+    for _ in range(1500):  # the challenger also trains the quantile model after the gate opens
         if not is_retrain_running():
             break
         time.sleep(0.02)
@@ -504,3 +531,71 @@ def test_retrain_endpoint_returns_202_409_and_enforces_internal_token(temp_mlflo
     assert len(history) == 1
     assert history[0]["run_id"] == body["run_id"]
     assert history[0]["outcome"] == "promoted"
+
+
+def _promote_directly(models_dir, train_df, test_df, df):
+    retrain_mod._verify_and_promote_challenger(
+        challenger_model=_fit_tiny_xgb(train_df, max_depth=3),
+        challenger_version="local",
+        champion_version="local",
+        models_dir=models_dir,
+        df_feat=df,
+        train_df=train_df,
+        test_df=test_df,
+        xgb_metrics={"rmse_kwh": 1.0},
+        train_end_iso="2017-12-14T03:00:00",
+        quantile_model=_fit_tiny_quantile(train_df),
+        quantile_metrics={"coverage_95": 0.9},
+    )
+
+
+def _seed_local(models_dir, train_df, with_quantile):
+    joblib.dump(_fit_tiny_xgb(train_df, max_depth=2, scale_target=0.5), models_dir / "xgboost_forecaster.joblib")
+    if with_quantile:
+        joblib.dump(_fit_tiny_quantile(train_df), models_dir / "xgboost_quantile.joblib")
+    return {
+        n: (models_dir / n).read_bytes() if (models_dir / n).exists() else None
+        for n in ("xgboost_forecaster.joblib", "xgboost_quantile.joblib", "model_metadata.json")
+    }
+
+
+def test_mid_swap_metadata_write_failure_restores_point_quantile_and_metadata(temp_mlflow_env, monkeypatch):
+    models_dir = temp_mlflow_env["models_dir"]
+    monkeypatch.setenv("ECOTRACK_DISABLE_MLFLOW", "1")
+    df = engineer_features(load_dataset(FIXTURE_CSV))
+    train_df, test_df = split_time_series_data(df, train_ratio=0.8)
+    before = _seed_local(models_dir, train_df, with_quantile=True)
+
+    real_write = retrain_mod._atomic_write_bytes
+    calls = []
+
+    def _fail_first(*a, **k):  # metadata write fails after both joblib swaps; restores must still work
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("meta boom")
+        return real_write(*a, **k)
+
+    monkeypatch.setattr(retrain_mod, "_atomic_write_bytes", _fail_first)
+    with pytest.raises(RuntimeError, match="meta boom"):
+        _promote_directly(models_dir, train_df, test_df, df)
+
+    for name, data in before.items():
+        assert (models_dir / name).read_bytes() == data, name
+
+
+def test_failed_promotion_without_prior_quantile_file_removes_it(temp_mlflow_env, monkeypatch):
+    models_dir = temp_mlflow_env["models_dir"]
+    monkeypatch.setenv("ECOTRACK_DISABLE_MLFLOW", "1")
+    df = engineer_features(load_dataset(FIXTURE_CSV))
+    train_df, test_df = split_time_series_data(df, train_ratio=0.8)
+    before = _seed_local(models_dir, train_df, with_quantile=False)
+    quantile_path = models_dir / "xgboost_quantile.joblib"
+
+    with monkeypatch.context() as m:
+        m.setattr(serving_frame, "reset_serving_cache", lambda: (_ for _ in ()).throw(RuntimeError("cache boom")))
+        with pytest.raises(RuntimeError, match="cache boom"):
+            _promote_directly(models_dir, train_df, test_df, df)
+
+    assert not quantile_path.exists()
+    assert (models_dir / "xgboost_forecaster.joblib").read_bytes() == before["xgboost_forecaster.joblib"]
+    assert (models_dir / "model_metadata.json").read_bytes() == before["model_metadata.json"]

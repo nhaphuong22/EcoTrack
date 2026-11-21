@@ -30,6 +30,13 @@
     "r2_score": 0.9785,
     "target_mape_met": true
   },
+  "quantile_metrics": {
+    "pinball_q2_5": 6.4004,
+    "pinball_q50": 19.6423,
+    "pinball_q97_5": 15.6318,
+    "coverage_95": 0.9318,
+    "mean_width_kwh": 784.45
+  },
   "isolation_forest_metrics": {
     "contamination": 0.03,
     "total_test_samples": 3504,

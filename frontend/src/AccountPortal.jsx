@@ -171,7 +171,7 @@ export default function AccountPortal() {
       <button className="btn btn-shell btn-sm" onClick={() => setAdminDashboard(false)}>Về cổng cư dân</button>
       <button className="btn btn-shell btn-sm" onClick={logout}>Đăng xuất</button>
     </ShellBar>
-    <Suspense fallback={<p className="min-h-screen bg-ground p-8 text-sm text-muted">Đang tải biểu đồ…</p>}><AdminDashboard /></Suspense>
+    <Suspense fallback={<p className="min-h-screen bg-ground p-8 text-sm text-muted">Đang tải biểu đồ…</p>}><AdminDashboard user={user} /></Suspense>
   </>;
 
   if (!user) return <main className="min-h-screen bg-ground lg:grid lg:grid-cols-[5fr_6fr]">

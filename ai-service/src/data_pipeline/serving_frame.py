@@ -12,7 +12,7 @@ import pandas as pd
 
 from src.config import get_data_path, get_models_dir, get_tariff_rate_usd, get_tariff_rate_vnd
 from src.data_pipeline.inference_pipeline import EnergyInferencePipeline
-from src.models.train_models import engineer_features, load_dataset
+from src.models.train_models import QUANTILE_FILENAME, engineer_features, load_dataset
 
 logger = logging.getLogger("ServingFrame")
 
@@ -46,6 +46,7 @@ _cached_hour_key: Optional[datetime] = None
 _cached_serving_frame: Optional[pd.DataFrame] = None
 _cached_xgb_model: Optional[Any] = None
 _cached_iso_model: Optional[Any] = None
+_cached_quantile_model: Optional[Any] = None
 _cached_pipeline: Optional["EnergyInferencePipeline"] = None
 
 FORECAST_HORIZON_HOURS = 24
@@ -57,7 +58,7 @@ _ZONE_SHARES: Dict[str, float] = {
 
 def reset_serving_cache() -> None:
     """Clears all in-memory cached frames and model artifacts."""
-    global _cached_base_df, _cached_meta, _cached_hour_key, _cached_serving_frame, _cached_xgb_model, _cached_iso_model, _cached_pipeline
+    global _cached_base_df, _cached_meta, _cached_hour_key, _cached_serving_frame, _cached_xgb_model, _cached_iso_model, _cached_quantile_model, _cached_pipeline
     with _lock:
         _cached_base_df = None
         _cached_meta = None
@@ -65,6 +66,7 @@ def reset_serving_cache() -> None:
         _cached_serving_frame = None
         _cached_xgb_model = None
         _cached_iso_model = None
+        _cached_quantile_model = None
         _cached_pipeline = None
 
 
@@ -123,6 +125,57 @@ def _load_champion_forecaster_or_fallback(xgb_path: Path) -> Any:
         raise ModelArtifactError(f"Failed to load model artifact: {exc}", file_path=str(xgb_path)) from exc
 
 
+def _load_champion_quantile_or_fallback(quantile_path: Path) -> Any:
+    """
+    Quantile model for the 95% band, resolved like the point forecaster: champion run artifact
+    when a champion exists, else ``models_saved/``. A missing artifact raises ``ModelArtifactError``;
+    there is no fixed-band fallback.
+    """
+    if not _mlflow_disabled():
+        try:
+            from src.mlops.tracking import (
+                ChampionArtifactError,
+                ChampionUnavailable,
+                load_champion_quantile_model,
+            )
+
+            try:
+                return load_champion_quantile_model()
+            except ChampionArtifactError as exc:
+                raise ModelArtifactError(
+                    f"Champion quantile model failed to load: {exc}", file_path="champion:quantile_model"
+                ) from exc
+            except ChampionUnavailable as exc:
+                logger.warning("MLflow champion unavailable (%s); using models_saved/ quantile model.", exc)
+        except ModelArtifactError:
+            raise
+        except Exception as exc:  # mlops import / unexpected config error -> disk
+            logger.warning("Champion quantile resolution skipped (%s); using models_saved/.", exc)
+
+    if not quantile_path.exists():
+        raise ModelArtifactError(f"Model artifact not found: {quantile_path}", file_path=str(quantile_path))
+    try:
+        return joblib.load(quantile_path)
+    except Exception as exc:
+        raise ModelArtifactError(f"Failed to load model artifact: {exc}", file_path=str(quantile_path)) from exc
+
+
+def _get_quantile_model() -> Any:
+    global _cached_quantile_model
+    with _lock:
+        if _cached_quantile_model is None:
+            _cached_quantile_model = _load_champion_quantile_or_fallback(get_models_dir() / QUANTILE_FILENAME)
+        return _cached_quantile_model
+
+
+def _bounds_from_quantiles(
+    predicted: Any, q_lower: Any, q_upper: Any, scale: float = 1.0
+) -> Tuple[np.ndarray, np.ndarray]:
+    """The one 95% band rule: always encloses ``predicted``, lower never below 0."""
+    predicted, q_lower, q_upper = (np.asarray(a, dtype=float) * scale for a in (predicted, q_lower, q_upper))
+    return np.maximum(0.0, np.minimum(q_lower, predicted)), np.maximum(q_upper, predicted)
+
+
 def _score_feature_df(
     df_feat: pd.DataFrame,
     metadata: Dict[str, Any],
@@ -137,9 +190,8 @@ def _score_feature_df(
     actual = df_feat["meter_reading"].values
     residual = actual - predicted
 
-    rmse = float(metadata["xgboost_metrics"]["rmse_kwh"])
-    lower_bound = np.maximum(0.0, predicted - 1.96 * rmse)
-    upper_bound = predicted + 1.96 * rmse
+    q = np.asarray(_get_quantile_model().predict(df_feat[xgb_cols]), dtype=float).reshape(len(predicted), -1)
+    lower_bound, upper_bound = _bounds_from_quantiles(predicted, q[:, 0], q[:, -1])
 
     raw_decisions = iso_model.decision_function(df_feat[iso_cols])
     preds = iso_model.predict(df_feat[iso_cols])
@@ -357,7 +409,6 @@ def _forecast_from_frame(
             required=FORECAST_HORIZON_HOURS,
         )
 
-    rmse = float(meta["xgboost_metrics"]["rmse_kwh"])
     tail_n = min(len(frame), 48)
     tail_frame = frame.iloc[-tail_n:]
     tail_ts = pd.to_datetime(tail_frame["timestamp"], utc=True).dt.tz_convert(None)
@@ -384,11 +435,13 @@ def _forecast_from_frame(
         recent_readings_df=recent_readings,
         future_timestamps=future_dt,
         future_temperatures=future_temps,
+        quantile_model=_get_quantile_model(),
     )
 
     predicted = forecast_df["predicted_meter_reading"].to_numpy(dtype=float)
-    lower_bound = np.maximum(0.0, predicted - 1.96 * rmse)
-    upper_bound = predicted + 1.96 * rmse
+    lower_bound, upper_bound = _bounds_from_quantiles(
+        predicted, forecast_df["quantile_lower"], forecast_df["quantile_upper"]
+    )
     iso_timestamps = [ts.strftime("%Y-%m-%dT%H:%M:%SZ") for ts in future_dt]
 
     return pd.DataFrame({
@@ -478,10 +531,10 @@ def predict_next_24h_from_series(rows: List[Dict[str, Any]]) -> pd.DataFrame:
             drift_adj = float(np.clip(r, 0.25, 4.0))
     eff = scale * drift_adj
     if eff != 1.0:
-        rmse_scaled = float(meta["xgboost_metrics"]["rmse_kwh"]) * eff
+        lo, hi = _bounds_from_quantiles(fc["predicted_kwh"], fc["lower_bound_95"], fc["upper_bound_95"], eff)
         fc["predicted_kwh"] = (fc["predicted_kwh"] * eff).round(2)
-        fc["lower_bound_95"] = np.maximum(0.0, fc["predicted_kwh"] - 1.96 * rmse_scaled).round(2)
-        fc["upper_bound_95"] = (fc["predicted_kwh"] + 1.96 * rmse_scaled).round(2)
+        fc["lower_bound_95"] = lo.round(2)
+        fc["upper_bound_95"] = hi.round(2)
     return fc
 
 
@@ -498,12 +551,14 @@ def score_timeseries_from_series(rows: List[Dict[str, Any]], limit: int = 168) -
         return get_serving_frame().tail(limit).reset_index(drop=True)
     scored = _score_feature_df(df_feat, meta, xgb_model, iso_model)
     if scale != 1.0:
-        rmse_scaled = float(meta["xgboost_metrics"]["rmse_kwh"]) * scale
+        lo, hi = _bounds_from_quantiles(
+            scored["predicted_kwh"], scored["lower_bound_95"], scored["upper_bound_95"], scale
+        )
         scored["meter_reading_kwh"] = (scored["meter_reading_kwh"].to_numpy(dtype=float) * scale).round(2)
         scored["predicted_kwh"] = (scored["predicted_kwh"].to_numpy(dtype=float) * scale).round(2)
         scored["residual"] = (scored["meter_reading_kwh"] - scored["predicted_kwh"]).round(2)
-        scored["lower_bound_95"] = np.maximum(0.0, scored["predicted_kwh"] - 1.96 * rmse_scaled).round(2)
-        scored["upper_bound_95"] = (scored["predicted_kwh"] + 1.96 * rmse_scaled).round(2)
+        scored["lower_bound_95"] = lo.round(2)
+        scored["upper_bound_95"] = hi.round(2)
     scored["timestamp"] = pd.to_datetime(scored["timestamp"]).dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     return scored.tail(limit).reset_index(drop=True)
 

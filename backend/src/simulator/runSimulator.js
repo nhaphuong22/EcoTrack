@@ -201,6 +201,10 @@ function parseArgs(args = process.argv.slice(2)) {
       options.includeBuildingTotal = false;
     } else if (arg === '--no-jitter') {
       options.jitter = false;
+    } else if (arg === '--fleet') {
+      options.fleet = true;
+    } else if (arg === '--wait') {
+      options.waitForGateway = true;
     } else if (arg === '--once') {
       options.once = true;
     } else if (arg === '--count' && args[i + 1]) {
@@ -219,9 +223,11 @@ function generateBatch(row, options = {}, timestamp = new Date().toISOString()) 
   const intervalScale = intervalMs / HOUR_MS;
   const intervalSeconds = Number((intervalMs / 1000).toFixed(3));
 
-  const items = ZONES.map((zoneId, idx) => {
-    let kwh = Math.max(0.0001, Number((totalReading * ZONE_MULTIPLIERS[idx] * intervalScale).toFixed(4)));
-    let temp = Number((baseTemp + TEMP_OFFSETS[idx]).toFixed(1));
+  const zones = options.zones || ZONES;
+  const shares = options.zoneShares || ZONE_MULTIPLIERS;
+  const items = zones.map((zoneId, idx) => {
+    let kwh = Math.max(0.0001, Number((totalReading * shares[idx] * intervalScale).toFixed(4)));
+    let temp = Number((baseTemp + (TEMP_OFFSETS[idx] ?? 0)).toFixed(1));
 
     if (options.anomalyZone && zoneId === options.anomalyZone) {
       kwh = Number((kwh * 2.5).toFixed(4));
@@ -306,18 +312,66 @@ async function seedBackfill(options, csvIndex = null, now = new Date()) {
   return totalStored;
 }
 
+// Households vary in size; derive a stable 0.6-1.4 factor from the zone id so each hộ keeps its own scale.
+function householdShare(zoneId) {
+  let h = 0;
+  for (const c of zoneId) h = (h * 31 + c.charCodeAt(0)) % 1000;
+  return 0.6 + (h / 1000) * 0.8;
+}
+
+async function fetchTargets(opts) {
+  const res = await fetch(`${opts.gatewayUrl.replace(/\/$/, '')}/api/v1/ingest/targets`, { headers: { 'X-Ingest-Key': opts.apiKey } });
+  if (!res.ok) throw new Error(`targets ${res.status}`);
+  return (await res.json()).buildings;
+}
+
+// Streams only what the gateway says should have data: re-read every tick so a household added by a manager starts producing
+// readings on the next tick. shortcut: a household added later gets no backfilled history, add per-zone backfill if needed.
+async function runFleet(opts) {
+  const backfilled = new Set();
+  let tickCount = 0;
+  console.log(`[Simulator] Fleet mode: following buildings and households registered in the gateway (interval: ${opts.intervalMs}ms)`);
+
+  const tick = async () => {
+    tickCount++;
+    let buildings = [];
+    try { buildings = await fetchTargets(opts); } catch (err) { console.warn(`[Simulator] Could not load targets: ${err.message}`); }
+    const now = new Date();
+    for (const b of buildings) {
+      if (!b.zones.length) continue;
+      const residential = b.building_type === 'Residential';
+      const o = { ...opts, fleet: false, buildingId: b.id, timeZone: b.timezone || opts.timeZone,
+        profile: residential ? 'household' : 'office', zones: b.zones,
+        zoneShares: b.zones.map((z) => (residential ? householdShare(z) : ZONE_MULTIPLIERS[ZONES.indexOf(z)] ?? 0.1)) };
+      if (opts.backfillHours > 0 && !backfilled.has(b.id)) { backfilled.add(b.id); await seedBackfill(o); }
+      await sendBatch(generateBatch(sampleTimeAlignedRow(now, o), o, now.toISOString()), o);
+    }
+    if (!opts.once && tickCount < opts.maxTicks) setTimeout(tick, opts.intervalMs);
+  };
+  await tick();
+}
+
 async function runSimulator(options = {}) {
   const opts = { ...parseArgs([]), ...options };
   if (!opts.apiKey) throw new Error('INGEST_API_KEY or --api-key is required.');
   const csvIndex = opts.profile === 'csv' ? indexCsvByDayHour(loadDataRows()) : null;
   let tickCount = 0;
 
+  // Started alongside the gateway by `npm run dev`: wait until it accepts connections (any HTTP status counts).
+  if (opts.waitForGateway) {
+    for (let i = 0; i < 120; i++) {
+      try { await fetch(opts.gatewayUrl); break; } catch { await new Promise((r) => setTimeout(r, 1000)); }
+    }
+  }
+
+  if (opts.fleet) return runFleet(opts);
+
   if (opts.backfillHours > 0) {
     await seedBackfill(opts, csvIndex);
   }
 
   console.log(
-    `[Simulator] Starting ${opts.profile} simulator for ${opts.buildingId} (${ZONES.length} zones, tz: ${opts.timeZone}, interval: ${opts.intervalMs}ms)`
+    `[Simulator] Starting ${opts.profile} simulator for ${opts.buildingId} (${(opts.zones || ZONES).length} zones, tz: ${opts.timeZone}, interval: ${opts.intervalMs}ms)`
   );
   if (opts.anomalyZone) {
     console.log(`[Simulator] Injecting anomaly into zone: ${opts.anomalyZone}`);
@@ -356,5 +410,6 @@ module.exports = {
   sendBatch,
   seedBackfill,
   runSimulator,
+  runFleet,
   parseArgs,
 };

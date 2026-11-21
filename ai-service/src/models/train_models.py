@@ -16,6 +16,7 @@ Model training pipeline for EcoTrack:
    - Saves trained estimators to `backend/models_saved/` as:
      - `xgboost_forecaster.joblib`
      - `isolation_forest.joblib`
+     - `xgboost_quantile.joblib` (2.5% / 50% / 97.5% quantiles for the 95% band)
 """
 
 import argparse
@@ -38,7 +39,13 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import IsolationForest
-from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error, r2_score
+from sklearn.metrics import (
+    mean_absolute_error,
+    mean_absolute_percentage_error,
+    mean_pinball_loss,
+    mean_squared_error,
+    r2_score,
+)
 import xgboost as xgb
 
 logging.basicConfig(
@@ -59,6 +66,9 @@ XGB_FEATURE_COLUMNS: List[str] = [
     "lag_1h",
     "lag_24h",
 ]
+
+QUANTILE_ALPHAS: List[float] = [0.025, 0.5, 0.975]
+QUANTILE_FILENAME = "xgboost_quantile.joblib"
 
 ISO_FEATURE_COLUMNS: List[str] = [
     "meter_reading",
@@ -200,6 +210,41 @@ def train_xgboost_forecaster(
     return forecaster, metrics, y_pred
 
 
+def train_quantile_forecaster(
+    train_df: pd.DataFrame, test_df: pd.DataFrame
+) -> Tuple[xgb.XGBRegressor, Dict[str, float], np.ndarray]:
+    """
+    Trains one multi-quantile XGBoost model (pinball loss) on the same features and split as the
+    point forecaster. ``predict`` returns columns [lower 2.5%, median 50%, upper 97.5%].
+    """
+    logger.info("Training quantile forecaster (%s) on %d samples...", QUANTILE_ALPHAS, len(train_df))
+    model = xgb.XGBRegressor(
+        n_estimators=350,
+        max_depth=4,
+        learning_rate=0.05,
+        subsample=0.85,
+        colsample_bytree=0.85,
+        objective="reg:quantileerror",
+        quantile_alpha=np.array(QUANTILE_ALPHAS),
+        random_state=42,
+        n_jobs=-1,
+    )
+    model.fit(train_df[XGB_FEATURE_COLUMNS], train_df["meter_reading"])
+
+    y_test = test_df["meter_reading"].to_numpy(dtype=float)
+    q_pred = np.asarray(model.predict(test_df[XGB_FEATURE_COLUMNS]), dtype=float).reshape(len(y_test), -1)
+    lower, upper = q_pred[:, 0], q_pred[:, -1]
+    metrics = {
+        "pinball_q2_5": round(float(mean_pinball_loss(y_test, q_pred[:, 0], alpha=0.025)), 4),
+        "pinball_q50": round(float(mean_pinball_loss(y_test, q_pred[:, 1], alpha=0.5)), 4),
+        "pinball_q97_5": round(float(mean_pinball_loss(y_test, q_pred[:, 2], alpha=0.975)), 4),
+        "coverage_95": round(float(np.mean((y_test >= lower) & (y_test <= upper))), 4),
+        "mean_width_kwh": round(float(np.mean(upper - lower)), 2),
+    }
+    logger.info("Quantile metrics: %s", metrics)
+    return model, metrics, q_pred
+
+
 def train_isolation_forest(
     train_df: pd.DataFrame, test_df: pd.DataFrame, contamination: float = 0.03
 ) -> Tuple[IsolationForest, Dict[str, Any], np.ndarray, np.ndarray]:
@@ -258,10 +303,11 @@ def save_trained_models(
     iso_model: IsolationForest,
     output_dir: Path,
     metadata: Dict[str, Any],
+    quantile_model: Optional[xgb.XGBRegressor] = None,
 ) -> Tuple[Path, Path]:
     """
     Saves trained models to .joblib files in the target directory.
-    Also saves metadata summary JSON.
+    Also saves metadata summary JSON (and the quantile model when given).
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -272,6 +318,8 @@ def save_trained_models(
     logger.info("Saving models to directory: %s...", output_dir)
     joblib.dump(xgb_model, xgb_path)
     joblib.dump(iso_model, iso_path)
+    if quantile_model is not None:
+        joblib.dump(quantile_model, output_dir / QUANTILE_FILENAME)
 
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
@@ -308,6 +356,8 @@ def run_pipeline(
     # 3. Train Model 1 (XGBoost)
     xgb_model, xgb_metrics, _ = train_xgboost_forecaster(train_df, test_df)
 
+    quantile_model, quantile_metrics, _ = train_quantile_forecaster(train_df, test_df)
+
     # 4. Train Model 2 (Isolation Forest)
     iso_model, iso_metrics, _, _ = train_isolation_forest(
         train_df, test_df, contamination=contamination
@@ -321,9 +371,11 @@ def run_pipeline(
         "xgb_features": XGB_FEATURE_COLUMNS,
         "iso_features": ISO_FEATURE_COLUMNS,
         "xgboost_metrics": xgb_metrics,
+        "quantile_metrics": quantile_metrics,
         "isolation_forest_metrics": iso_metrics,
     }
     xgb_path, iso_path = save_trained_models(
+        quantile_model=quantile_model,
         xgb_model=xgb_model,
         iso_model=iso_model,
         output_dir=out_dir,
@@ -357,6 +409,7 @@ def run_pipeline(
                 params=tracked_params,
                 metrics=xgb_metrics,
                 features=XGB_FEATURE_COLUMNS,
+                quantile_model=quantile_model,
                 row_counts={
                     "dataset_rows": len(df_feat),
                     "train_rows": len(train_df),

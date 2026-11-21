@@ -157,3 +157,25 @@ describe('Sensor Simulator Bot (runSimulator)', () => {
     warnSpy.mockRestore();
   });
 });
+
+describe('fleet', () => {
+  it('streams only the zones the gateway lists, per building', async () => {
+    const { runFleet } = await import('../src/simulator/runSimulator');
+    const posted = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      if (String(url).endsWith('/targets')) {
+        return { ok: true, json: async () => ({ buildings: [
+          { id: 'residence_01', building_type: 'Residential', timezone: 'Asia/Ho_Chi_Minh', zones: ['z-a', 'z-b'] },
+          { id: 'empty_01', building_type: 'Residential', timezone: 'UTC', zones: [] },
+        ] }) };
+      }
+      posted.push(...JSON.parse(init.body));
+      return { ok: true, json: async () => ({ stored: 1 }) };
+    }));
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runFleet({ ...parseArgs([]), apiKey: 'k', once: true, backfillHours: 0 });
+    vi.unstubAllGlobals();
+    expect(new Set(posted.map((r) => r.building_id))).toEqual(new Set(['residence_01']));
+    expect(posted.filter((r) => r.zone_id).map((r) => r.zone_id)).toEqual(['z-a', 'z-b']);
+  });
+});

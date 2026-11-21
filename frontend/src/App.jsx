@@ -1,5 +1,7 @@
 import { useState, useCallback } from 'react';
-import { Bot, AlertCircle, LayoutDashboard, Map } from 'lucide-react';
+import { Bot, AlertCircle, LayoutDashboard, Map, Cpu } from 'lucide-react';
+import MLOpsPanel from './components/dashboard/MLOpsPanel';
+import { canViewMLOps } from './hooks/useMLOpsStatus';
 import Header from './components/layout/Header';
 import MetricCards from './components/dashboard/MetricCards';
 import ForecastChart from './components/dashboard/ForecastChart';
@@ -12,7 +14,8 @@ import { useCopilot } from './hooks/useCopilot';
 import { buildAnomalyPrompt, buildZonePrompt } from './lib/copilotPrompt';
 import { API_BASE_URL } from './services/api';
 
-export default function App() {
+export default function App({ user = null }) {
+  const showMLOps = canViewMLOps(user);
   const { metrics, timeSeries, anomalies, forecast, loading, error, refetch } = useEnergyData(168);
   const { messages, isLoading: copilotLoading, error: copilotError, sendMessage, stopStreaming, retry, clearHistory } = useCopilot();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -66,6 +69,19 @@ export default function App() {
               Live
             </span>
           </button>
+
+          {showMLOps && (
+            <button
+              id="tab-mlops"
+              role="tab"
+              aria-selected={activeTab === 'mlops'}
+              onClick={() => setActiveTab('mlops')}
+              className={tabClass(activeTab === 'mlops')}
+            >
+              <Cpu size={16} aria-hidden="true" />
+              <span>MLOps</span>
+            </button>
+          )}
         </div>
       </Header>
 
@@ -85,13 +101,13 @@ export default function App() {
           <>
             <MetricCards metrics={metrics} />
 
-            <ForecastChart timeSeries={timeSeries} forecast={forecast} loading={loading} />
+            <ForecastChart timeSeries={timeSeries} forecast={forecast} loading={loading && timeSeries.length === 0} />
 
             <div className="grid items-start gap-5 lg:grid-cols-3">
               <div className="lg:col-span-2">
                 <AnomalyTable
                   anomalies={anomalies}
-                  loading={loading}
+                  loading={loading && anomalies.length === 0}
                   onAskCopilot={handleAskCopilot}
                 />
               </div>
@@ -100,6 +116,8 @@ export default function App() {
               <SystemStatus />
             </div>
           </>
+        ) : activeTab === 'mlops' && showMLOps ? (
+          <MLOpsPanel isAdmin={user?.role === 'ADMIN'} />
         ) : (
           <FloorPlan onAskCopilot={handleAskCopilotZone} />
         )}

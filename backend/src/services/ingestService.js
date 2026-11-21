@@ -95,6 +95,25 @@ async function ingestReadings(readings) {
   return { stored: inserted.length };
 }
 
+// Residential buildings only produce data for zones whose unit has an active household (or common areas);
+// other building types keep streaming every provisioned zone. A zone without a meter cannot ingest, so it is skipped.
+async function listTargets() {
+  const buildings = await prisma.building.findMany({
+    include: { zones: { orderBy: { id: 'asc' }, include: { meter: true,
+      unit: { include: { households: { where: { ends_at: null } } } } } } },
+  });
+  return buildings.map((b) => ({
+    id: b.id,
+    building_type: b.building_type,
+    timezone: b.timezone,
+    zones: b.zones
+      .filter((z) => z.meter && (b.building_type !== 'Residential'
+        || z.meter.scope === 'COMMON' || (z.unit?.active && z.unit.households.length > 0)))
+      .map((z) => z.id),
+  }));
+}
+
 module.exports = {
   ingestReadings,
+  listTargets,
 };

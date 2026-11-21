@@ -104,7 +104,7 @@ def test_copilot_get_anomalies_and_forecast_summary():
     assert "expected_peak_kw" in fc_summary
     assert "peak_timestamp" in fc_summary
     assert "average_forecast_kwh" in fc_summary
-    assert fc_summary["confidence_interval_95"].startswith("±")
+    assert " đến " in fc_summary["confidence_interval_95"]
 
     real_fc = predict_next_24h()
     assert fc_summary["expected_peak_kw"] == float(real_fc["predicted_kwh"].max())

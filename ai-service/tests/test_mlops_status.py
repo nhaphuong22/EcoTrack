@@ -373,6 +373,9 @@ def test_status_mlmodel_flavors_nested_artifacts_and_tracking_uri_whitespace(
     assert get_mlops_status()["champion"]["status"] == "broken"
 
     # 5. Whitespace-only MLFLOW_TRACKING_URI treated as unset / uninitialized.
+    # Point the default store at an empty folder so a real ai-service/mlruns/mlflow.db on the
+    # developer's machine cannot make the "uninitialized" assertion fail.
+    monkeypatch.setattr(mlops_config, "mlruns_dir", lambda: tmp_path / "no_default_store")
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     unset_uri = mlops_config.get_tracking_uri()
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "   ")
