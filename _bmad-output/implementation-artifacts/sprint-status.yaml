@@ -75,7 +75,7 @@ development_status:
   4-10-report-model-and-drift-status: done
   4-11-expose-model-monitoring-to-admins: done
   4-12-monitor-the-model-as-an-admin: done
-  4-13-forecast-with-learned-prediction-intervals: review
+  4-13-forecast-with-learned-prediction-intervals: done
   epic-4-retrospective: optional
 
   epic-5: done
