@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import EventEmitter from 'events';
 
 const mockPrisma = {
+  $queryRaw: vi.fn(),
   meterReading: {
     findMany: vi.fn(),
   },
@@ -28,6 +29,7 @@ describe('Live DB forecast & live anomaly detection bridge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockPrisma.meterReading.findMany.mockResolvedValue([]);
+    mockPrisma.$queryRaw.mockResolvedValue([]);
     mockPrisma.anomalyEvent.findFirst.mockResolvedValue(null);
   });
 
@@ -37,13 +39,11 @@ describe('Live DB forecast & live anomaly detection bridge', () => {
   });
 
   it('aggregates completed UTC hours without double-counting building seeds + zone rows', async () => {
-    mockPrisma.meterReading.findMany.mockResolvedValueOnce([
-      // Hour 1 has both a building seed row (zone_id null) and two zone rows -> prefer zone sum (15 + 25 = 40)
-      { timestamp: new Date('2026-11-17T10:00:00Z'), zone_id: null, meter_reading_kwh: 180, outdoor_temperature_c: 26 },
-      { timestamp: new Date('2026-11-17T10:00:00Z'), zone_id: 'z1', meter_reading_kwh: 15, outdoor_temperature_c: 28 },
-      { timestamp: new Date('2026-11-17T10:03:00Z'), zone_id: 'z2', meter_reading_kwh: 25, outdoor_temperature_c: 30 },
-      // Hour 2 has only building seed -> uses 190
-      { timestamp: new Date('2026-11-17T11:00:00Z'), zone_id: null, meter_reading_kwh: 190, outdoor_temperature_c: 27 },
+    mockPrisma.$queryRaw.mockResolvedValueOnce([
+      // Hour 1 has both a building seed row and zone rows -> the zone sum (15 + 25 = 40) wins over the seed (180)
+      { hour: new Date('2026-11-17T10:00:00Z'), zone_sum: 40, total_sum: 180, temp: 28 },
+      // Hour 2 has only the building seed -> uses 190
+      { hour: new Date('2026-11-17T11:00:00Z'), zone_sum: null, total_sum: 190, temp: 27 },
     ]);
 
     const series = await getHourlyBuildingSeries('office_tower_01', 48);
@@ -68,7 +68,7 @@ describe('Live DB forecast & live anomaly detection bridge', () => {
       meter_reading_kwh: 20 + i,
       outdoor_temperature_c: 27,
     }));
-    mockPrisma.meterReading.findMany.mockResolvedValueOnce(rows);
+    mockPrisma.$queryRaw.mockResolvedValueOnce(rows.map((r) => ({ hour: r.timestamp, zone_sum: r.meter_reading_kwh, total_sum: null, temp: r.outdoor_temperature_c })));
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -177,7 +177,7 @@ describe('Live DB forecast & live anomaly detection bridge', () => {
       meter_reading_kwh: 100 + i,
       outdoor_temperature_c: 26,
     }));
-    mockPrisma.meterReading.findMany.mockResolvedValueOnce(rows);
+    mockPrisma.$queryRaw.mockResolvedValueOnce(rows.map((r) => ({ hour: r.timestamp, zone_sum: r.meter_reading_kwh, total_sum: null, temp: r.outdoor_temperature_c })));
     mockPrisma.anomalyEvent.findMany.mockResolvedValueOnce([
       {
         id: 'ANOM-LIVE-1',

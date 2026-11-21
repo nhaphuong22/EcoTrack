@@ -17,17 +17,15 @@ export function useEnergyData(timeSeriesLimit = 168) {
     setLoading(true);
     setError(null);
     try {
-      const [m, ts, an, fc] = await Promise.all([
-        fetchMetrics(),
-        fetchTimeSeries(timeSeriesLimit),
-        fetchAnomalies(),
-        fetchForecast(),
+      // Apply each response as soon as it arrives so fast sections render without waiting for the slowest one.
+      const apply = (request, setter) => request.then((data) => { if (version === requestVersion.current) setter(data); });
+      await Promise.all([
+        apply(fetchMetrics(), setMetrics),
+        apply(fetchTimeSeries(timeSeriesLimit), (ts) => setTimeSeries(ts.data || [])),
+        apply(fetchAnomalies(), (an) => setAnomalies(Array.isArray(an) ? an : [])),
+        apply(fetchForecast(), (fc) => setForecast(fc.forecast || [])),
       ]);
       if (version !== requestVersion.current) return;
-      setMetrics(m);
-      setTimeSeries(ts.data || []);
-      setAnomalies(Array.isArray(an) ? an : []);
-      setForecast(fc.forecast || []);
     } catch (err) {
       if (version !== requestVersion.current) return;
       setError(err?.message || 'Failed to fetch energy data');

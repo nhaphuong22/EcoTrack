@@ -101,13 +101,13 @@ export default function App({ user = null }) {
           <>
             <MetricCards metrics={metrics} />
 
-            <ForecastChart timeSeries={timeSeries} forecast={forecast} loading={loading} />
+            <ForecastChart timeSeries={timeSeries} forecast={forecast} loading={loading && timeSeries.length === 0} />
 
             <div className="grid items-start gap-5 lg:grid-cols-3">
               <div className="lg:col-span-2">
                 <AnomalyTable
                   anomalies={anomalies}
-                  loading={loading}
+                  loading={loading && anomalies.length === 0}
                   onAskCopilot={handleAskCopilot}
                 />
               </div>

@@ -5,7 +5,7 @@
   "description": "EcoTrack - Smart Building Energy Management System",
   "scripts": {
     "dev": "concurrently --kill-others -n \"AI,WEB\" -c \"magenta,cyan\" \"python -m uvicorn src.main:app --app-dir ai-service --reload --reload-dir ai-service/src --port 8000\" \"npm run dev:web\"",
-    "dev:web": "node scripts/wait-for-ai.cjs && concurrently --kill-others -n \"BACKEND,FRONTEND\" -c \"green,cyan\" \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "dev:web": "node scripts/wait-for-ai.cjs && concurrently --kill-others -n \"BACKEND,FRONTEND,SIM\" -c \"green,cyan,yellow\" \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\" \"npm run simulate --prefix backend -- --fleet --wait --backfill-hours 72\"",
     "dev:docker": "docker compose up -d db && npm run dev",
     "dev:all": "docker compose up",
     "install:all": "npm install && npm install --prefix backend && npm install --prefix frontend && pip install -r ai-service/requirements.txt -r ai-service/requirements-experiments.txt",

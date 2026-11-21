@@ -5,6 +5,7 @@ const prisma = require('../db');
 const { access, overview, zones, manages, fail } = require('../services/portalService');
 const { hashToken, isCurrent, resolveSession } = require('../services/authService');
 const { sendInvitationEmail } = require('../services/mailService');
+const { meterId } = require('../services/meterService');
 const { readingEmitter } = require('../services/readingStreamService');
 const router = express.Router();
 const wrap = (handler) => async (req, res, next) => { try { await handler(req, res); } catch (error) { next(error); } };
@@ -52,6 +53,13 @@ router.post('/units', wrap(async (req, res) => {
       const meter = await tx.meter.updateMany({ where: { zone_id: input.zone_id, building_id: input.building_id,
         scope: 'UNASSIGNED', unit_id: null }, data: { scope: 'UNIT', unit_id: unit.id } });
       if (meter.count !== 1) fail('Only unassigned meters can be attached.', 409);
+    } else {
+      // No existing meter chosen: provision this household's own zone + meter so it starts producing readings.
+      const zoneId = `z-${unit.id.slice(0, 8)}`;
+      await tx.zone.create({ data: { id: zoneId, building_id: input.building_id, floor: input.floor,
+        name: `Căn ${input.code}`, unit_id: unit.id } });
+      await tx.meter.create({ data: { id: meterId(input.building_id, zoneId), building_id: input.building_id,
+        zone_id: zoneId, unit_id: unit.id, name: `Căn ${input.code}`, scope: 'UNIT' } });
     }
     return { unit, household };
   });
