@@ -245,7 +245,7 @@ def _load_model_artifacts(models_dir: Path) -> Tuple[Dict[str, Any], Any, Any]:
 
 
 def _ensure_artifacts_only() -> Tuple[Dict[str, Any], Any, Any, EnergyInferencePipeline]:
-    global _cached_meta, _cached_xgb_model, _cached_iso_model, _cached_quantile_model, _cached_pipeline
+    global _cached_meta, _cached_xgb_model, _cached_iso_model, _cached_pipeline
     with _lock:
         if _cached_xgb_model is None or _cached_iso_model is None or _cached_meta is None:
             models_dir = get_models_dir()
