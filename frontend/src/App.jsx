@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Bot, AlertCircle, LayoutDashboard, Map } from 'lucide-react';
+import { Bot, AlertCircle, LayoutDashboard, Map, FileBarChart } from 'lucide-react';
 import Header from './components/layout/Header';
 import MetricCards from './components/dashboard/MetricCards';
 import ForecastChart from './components/dashboard/ForecastChart';
@@ -11,12 +11,13 @@ import { useEnergyData } from './hooks/useEnergyData';
 import { useCopilot } from './hooks/useCopilot';
 import { buildAnomalyPrompt, buildZonePrompt } from './lib/copilotPrompt';
 import { API_BASE_URL } from './services/api';
+import MonthlyReport from './components/reports/MonthlyReport';
 
 export default function App() {
   const { metrics, timeSeries, anomalies, forecast, loading, error, refetch } = useEnergyData(168);
   const { messages, isLoading: copilotLoading, error: copilotError, sendMessage, stopStreaming, retry, clearHistory } = useCopilot();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'floorplan'
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'floorplan' | 'reports'
 
   const handleAskCopilot = useCallback((anomaly) => {
     const prompt = buildAnomalyPrompt(anomaly);
@@ -53,6 +54,17 @@ export default function App() {
           </button>
 
           <button
+            id="tab-reports"
+            role="tab"
+            aria-selected={activeTab === 'reports'}
+            onClick={() => setActiveTab('reports')}
+            className={tabClass(activeTab === 'reports')}
+          >
+            <FileBarChart size={16} aria-hidden="true" />
+            <span>Báo cáo tháng</span>
+          </button>
+
+          <button
             id="tab-floorplan"
             role="tab"
             aria-selected={activeTab === 'floorplan'}
@@ -71,7 +83,7 @@ export default function App() {
 
       <main className="mx-auto max-w-screen-2xl space-y-5 px-4 py-5 sm:px-6 lg:px-8">
         {/* Error banner */}
-        {error && (
+        {activeTab === 'dashboard' && error && (
           <div role="alert" className="flex items-start gap-3 rounded-md border border-crit/30 bg-crit-bg px-4 py-3 text-sm text-crit">
             <AlertCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
             <span>
@@ -100,8 +112,10 @@ export default function App() {
               <SystemStatus />
             </div>
           </>
-        ) : (
+        ) : activeTab === 'floorplan' ? (
           <FloorPlan onAskCopilot={handleAskCopilotZone} />
+        ) : (
+          <MonthlyReport />
         )}
       </main>
 

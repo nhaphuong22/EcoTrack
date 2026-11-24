@@ -17,7 +17,7 @@ const formatKwh = (value) => (value > 0 && value < 1 ? value.toFixed(4) : value.
 
 export default function AccountPortal() {
   const [user, setUser] = useState(null);
-  const [adminDashboard, setAdminDashboard] = useState(false);
+  const [adminDashboard, setAdminDashboard] = useState(() => window.location.pathname === '/dashboard');
   const [checking, setChecking] = useState(true);
   const [register, setRegister] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -33,6 +33,16 @@ export default function AccountPortal() {
   const [chatId, setChatId] = useState(null);
   const version = useRef(0);
   const [inviteNotice, setInviteNotice] = useState('');
+  const navigateTo = useCallback((path, replace = false) => {
+    window.history[replace ? 'replaceState' : 'pushState']({}, '', path);
+    setAdminDashboard(path === '/dashboard');
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => setAdminDashboard(window.location.pathname === '/dashboard');
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
   useEffect(() => {
     const url = new URL(window.location.href);
     const invited = url.searchParams.get('invite_token');
@@ -75,6 +85,10 @@ export default function AccountPortal() {
     }
   }, []);
   useEffect(() => { reloadIdentity().catch((err) => setError(message(err))).finally(() => setChecking(false)); }, [reloadIdentity]);
+
+  useEffect(() => {
+    if (!checking && adminDashboard && !user?.role) navigateTo('/', true);
+  }, [adminDashboard, checking, navigateTo, user?.role]);
 
   const contexts = [...new Map([
     ...(user?.households || []).map((household) => ({ key: `household:${household.id}`, scope: 'household',
@@ -145,7 +159,7 @@ export default function AccountPortal() {
   async function logout() {
     try {
       await accountApi.post('/api/v1/auth/logout');
-      version.current += 1; setUser(null); setData(null); setZones([]); setSelection(''); setBuildings([]); setManagedContexts([]); setChat([]); setGoogleError(''); setAdminDashboard(false);
+      version.current += 1; setUser(null); setData(null); setZones([]); setSelection(''); setBuildings([]); setManagedContexts([]); setChat([]); setGoogleError(''); navigateTo('/', true);
     } catch (err) { setError(message(err)); }
   }
   async function ask(event) {
@@ -168,7 +182,7 @@ export default function AccountPortal() {
   if (user?.role && adminDashboard) return <>
     <ShellBar navLabel="Điều hướng quản trị">
       <span className="mr-2 text-sm text-shell-muted">Vận hành · {user.name} ({user.role})</span>
-      <button className="btn btn-shell btn-sm" onClick={() => setAdminDashboard(false)}>Về cổng cư dân</button>
+      <button className="btn btn-shell btn-sm" onClick={() => navigateTo('/')}>Về cổng cư dân</button>
       <button className="btn btn-shell btn-sm" onClick={logout}>Đăng xuất</button>
     </ShellBar>
     <Suspense fallback={<p className="min-h-screen bg-ground p-8 text-sm text-muted">Đang tải biểu đồ…</p>}><AdminDashboard /></Suspense>
@@ -215,7 +229,7 @@ export default function AccountPortal() {
   return <div className="min-h-screen bg-ground">
     <ShellBar context="Năng lượng cư dân" navLabel="Tài khoản">
       <span className="mr-1 text-sm font-medium text-white">{user.name}</span>
-      {user.role && <button className="btn btn-shell btn-sm" onClick={() => setAdminDashboard(true)}>Dashboard hệ thống</button>}
+      {user.role && <button className="btn btn-shell btn-sm" onClick={() => navigateTo('/dashboard')}>Dashboard hệ thống</button>}
       {!user.google_linked && <a className="btn btn-shell btn-sm" href={`${API_BASE_URL}/api/v1/auth/google/start`}>Liên kết Google</a>}
       <button onClick={logout} className="btn btn-shell btn-sm">Đăng xuất</button>
     </ShellBar>

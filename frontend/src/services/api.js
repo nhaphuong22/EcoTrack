@@ -126,3 +126,9 @@ export const fetchMLOpsStatus = () =>
 /** POST /api/v1/mlops/retrain */
 export const triggerMLOpsRetrain = () =>
   apiClient.post('/api/v1/mlops/retrain').then(r => r.data);
+
+/** GET /api/v1/reports/monthly */
+export const fetchMonthlyReport = (month, buildingId = 'office_tower_01') =>
+  apiClient.get('/api/v1/reports/monthly', {
+    params: { month, building_id: buildingId },
+  }).then(r => r.data);

@@ -24,13 +24,13 @@ export default function CopilotDrawer({
 
   useEffect(() => {
     if (!isOpen) return undefined;
-    if (initialMessage) setInput(initialMessage);
     const focusTimer = setTimeout(() => {
       inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(initialMessage.length, initialMessage.length);
+      const cursorPosition = inputRef.current?.value.length || 0;
+      inputRef.current?.setSelectionRange(cursorPosition, cursorPosition);
     }, 320);
     return () => clearTimeout(focusTimer);
-  }, [isOpen, initialMessage]);
+  }, [isOpen]);
 
   const handleSend = () => {
     const msg = input.trim();

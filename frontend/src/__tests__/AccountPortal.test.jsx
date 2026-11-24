@@ -20,6 +20,7 @@ class Source {
 }
 beforeEach(() => {
   vi.resetAllMocks(); currentUser = null; manageUnits = []; Source.instances = []; vi.stubGlobal('EventSource', Source);
+  window.history.replaceState({}, '', '/');
   accountApi.get.mockImplementation(async (path, options) => {
     if (path === '/api/v1/auth/me') {
       if (!currentUser) throw signedOut;
@@ -95,9 +96,22 @@ describe('Resident account portal', () => {
     render(<AccountPortal />);
     fireEvent.click(await screen.findByRole('button', { name: 'Dashboard hệ thống' }));
     expect(await screen.findByText('Original system dashboard')).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/dashboard');
     fireEvent.click(screen.getByRole('button', { name: 'Về cổng cư dân' }));
     expect(await screen.findByRole('button', { name: 'Dashboard hệ thống' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/');
     expect(screen.queryByText('Original system dashboard')).not.toBeInTheDocument();
+  });
+
+  it('opens a bookmarked dashboard URL and follows browser navigation', async () => {
+    currentUser = { ...resident, households: [], is_platform_admin: true, role: 'ADMIN' };
+    window.history.replaceState({}, '', '/dashboard');
+    render(<AccountPortal />);
+    expect(await screen.findByText('Original system dashboard')).toBeInTheDocument();
+
+    window.history.pushState({}, '', '/');
+    fireEvent(window, new PopStateEvent('popstate'));
+    expect(await screen.findByRole('button', { name: 'Dashboard hệ thống' })).toBeInTheDocument();
   });
 
   it('lets building staff (TECHNICIAN) open the operations dashboard', async () => {
