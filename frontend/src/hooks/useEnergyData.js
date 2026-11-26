@@ -8,6 +8,7 @@ export function useEnergyData(timeSeriesLimit = 168) {
   const [forecast, setForecast] = useState([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
   const retryTimer = useRef(null);
   const requestVersion = useRef(0);
 
@@ -26,6 +27,7 @@ export function useEnergyData(timeSeriesLimit = 168) {
         apply(fetchForecast(), (fc) => setForecast(fc.forecast || [])),
       ]);
       if (version !== requestVersion.current) return;
+      setLastUpdated(new Date());
     } catch (err) {
       if (version !== requestVersion.current) return;
       setError(err?.message || 'Failed to fetch energy data');
@@ -79,5 +81,5 @@ export function useEnergyData(timeSeriesLimit = 168) {
     };
   }, [metrics, anomalies]);
 
-  return { metrics: syncedMetrics, timeSeries, anomalies, forecast, loading, error, refetch };
+  return { metrics: syncedMetrics, timeSeries, anomalies, forecast, loading, error, lastUpdated, refetch };
 }

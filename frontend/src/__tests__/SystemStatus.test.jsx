@@ -37,7 +37,7 @@ describe('SystemStatus - Story 2.3 Real System Status Monitoring (FR45)', () => 
     await waitFor(() => {
       expect(screen.getByTestId('xgboost-status-text')).toHaveTextContent('Đang chạy');
       expect(screen.getByTestId('isolation_forest-status-text')).toHaveTextContent('Đang chạy');
-      expect(screen.getByTestId('copilot-status-text')).toHaveTextContent('Sẵn sàng (google_genai)');
+      expect(screen.getByTestId('copilot-status-text')).toHaveTextContent('Sẵn sàng');
       expect(screen.getByTestId('database-status-text')).toHaveTextContent('Đồng bộ');
       expect(screen.getByTestId('ai_service-status-text')).toHaveTextContent('Trực tuyến');
     });

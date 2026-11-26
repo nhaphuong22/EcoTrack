@@ -175,7 +175,7 @@ describe('App - Story 1.7 Copilot & Anomaly Context Integration', () => {
 
     render(<App />);
 
-    const banner = await screen.findByText(/Không thể tải dữ liệu từ backend/i);
+    const banner = await screen.findByText(/Không thể tải dữ liệu từ máy chủ/i);
     expect(banner).toBeInTheDocument();
 
     // Must name configured URL (http://localhost:5000), NOT :8000
@@ -350,8 +350,58 @@ describe('App - Story 4.12 MLOps tab gating', () => {
       drift: null, anomaly_quality: null, retrain_history: [], benchmark: null, errors: {},
     });
     render(<App user={user} />);
-    fireEvent.click(await screen.findByRole('tab', { name: /MLOps/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: /AI & Mô hình/ }));
     expect(await screen.findByRole('heading', { name: 'Giám sát mô hình (MLOps)' })).toBeInTheDocument();
     expect(Boolean(screen.queryByRole('button', { name: 'Retrain' }))).toBe(retrain);
+  });
+
+  it('switches time range pills and avoids IT jargon on the main dashboard', async () => {
+    api.fetchAnomalies.mockResolvedValue([]);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(api.fetchTimeSeries).toHaveBeenCalledWith(168);
+    });
+
+    expect(screen.getByText('Phụ tải điện: Thực tế & Dự báo')).toBeInTheDocument();
+    expect(screen.getByText('Tình trạng vận hành')).toBeInTheDocument();
+    expect(screen.queryByText(/XGBoost|Isolation Forest|PostgreSQL|FastAPI|LLM Copilot/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '24 giờ' }));
+    await waitFor(() => {
+      expect(api.fetchTimeSeries).toHaveBeenCalledWith(24);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '30 ngày' }));
+    await waitFor(() => {
+      expect(api.fetchTimeSeries).toHaveBeenCalledWith(720);
+    });
+  });
+
+  it('renders a single unified header and sidebar account controls when operator props are passed', async () => {
+    api.fetchAnomalies.mockResolvedValue([]);
+    const onBackToPortal = vi.fn();
+    const onLogout = vi.fn();
+
+    render(
+      <App
+        user={{ name: 'Minh Anh', role: 'ADMIN', staff: [] }}
+        onBackToPortal={onBackToPortal}
+        onLogout={onLogout}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('banner')).toHaveLength(1);
+    });
+
+    expect(screen.getByText('Minh Anh')).toBeInTheDocument();
+    expect(screen.getByText('Quản trị viên')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Về cổng cư dân' }));
+    expect(onBackToPortal).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Đăng xuất' }));
+    expect(onLogout).toHaveBeenCalledTimes(1);
   });
 });
