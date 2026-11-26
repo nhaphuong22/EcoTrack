@@ -15,7 +15,7 @@ const mockAnomaly = {
 const mockPrisma = {
   anomalyEvent: {
     findUnique: vi.fn(),
-    update: vi.fn(),
+    updateMany: vi.fn(),
     findMany: vi.fn(),
     upsert: vi.fn(),
   },
@@ -24,7 +24,7 @@ const mockPrisma = {
 global.__mockPrisma = mockPrisma;
 
 import request from 'supertest';
-import app from '../src/app';
+import app from './helpers/adminApp';
 
 describe('Anomaly Lifecycle Endpoints in Express Backend', () => {
   beforeEach(() => {
@@ -34,10 +34,7 @@ describe('Anomaly Lifecycle Endpoints in Express Backend', () => {
 
   describe('PATCH /api/v1/anomalies/:id/status', () => {
     it('should update anomaly status from OPEN to ACKNOWLEDGED', async () => {
-      mockPrisma.anomalyEvent.update.mockResolvedValue({
-        ...mockAnomaly,
-        status: 'ACKNOWLEDGED',
-      });
+      mockPrisma.anomalyEvent.updateMany.mockResolvedValue({ count: 1 });
 
       const res = await request(app)
         .patch('/api/v1/anomalies/ANOM-1234/status')

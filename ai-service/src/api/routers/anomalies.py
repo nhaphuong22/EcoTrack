@@ -1,44 +1,31 @@
 import asyncio
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
-from src.data_pipeline.bdg2_loader import data_loader
-from src.models.forecaster_xgboost import energy_forecaster
-from src.models.anomaly_isolation_forest import anomaly_detector
+from src.data_pipeline.serving_frame import get_anomaly_events, score_live_readings
 
 router = APIRouter(prefix="/internal/anomalies", tags=["Anomaly Detection"])
 
 
+class LiveScoreItem(BaseModel):
+    building_id: str = "office_tower_01"
+    zone_id: Optional[str] = None
+    meter_id: Optional[str] = None
+    timestamp: str
+    meter_reading_kwh: float
+    interval_seconds: Optional[float] = 3600.0
+    outdoor_temperature_c: Optional[float] = None
+    recent_meter_hourly_kwhs: List[float] = Field(default_factory=list)
+    recent_building_hourly_kwhs: List[float] = Field(default_factory=list)
+
+
+class LiveScoreRequest(BaseModel):
+    items: List[LiveScoreItem] = Field(..., max_length=200)
+
+
 def _detect_anomalies_pure() -> List[Dict[str, Any]]:
-    df = data_loader.get_or_create_data()
-    df_fc = energy_forecaster.predict_horizon(df)
-    df_anom = anomaly_detector.detect_anomalies(df_fc)
-
-    anom_rows = df_anom[df_anom["is_anomaly"]].copy()
-    events = []
-
-    for idx, row in anom_rows.iterrows():
-        delta = max(0.0, float(row["meter_reading_kwh"]) - float(row["predicted_kwh"]))
-        cost_vnd = delta * 3100
-        cost_usd = delta * 0.125
-        events.append({
-            "id": f"ANOM-{idx}",
-            "building_id": "office_tower_01",
-            "timestamp": str(row["timestamp"]),
-            "subsystem": "Chiller & HVAC Plant",
-            "severity": str(row["severity"]),
-            "anomaly_score": float(row["anomaly_score"]),
-            "actual_kwh": float(row["meter_reading_kwh"]),
-            "predicted_kwh": float(row["predicted_kwh"]),
-            "delta_kwh": delta,
-            "outdoor_temp_c": float(row["outdoor_temperature_c"]),
-            "estimated_waste_vnd": round(cost_vnd, 0),
-            "estimated_waste_usd": round(cost_usd, 2),
-            "status": "OPEN",
-            "description": row.get("anomaly_reason") or "Abnormal load deviation exceeding baseline prediction",
-            "suggested_action": row.get("anomaly_reason") or "Inspect chiller plant schedule and sub-meter power draw.",
-        })
-    return events[::-1]
+    return get_anomaly_events()
 
 
 @router.get("/detect")
@@ -46,3 +33,10 @@ def _detect_anomalies_pure() -> List[Dict[str, Any]]:
 async def detect_anomalies():
     """Pure ML Anomaly detection calculation."""
     return await asyncio.to_thread(_detect_anomalies_pure)
+
+
+@router.post("/score")
+async def score_anomalies(req: LiveScoreRequest):
+    """Score live ingested meter readings with XGBoost baseline + Isolation Forest."""
+    items = [item.model_dump() for item in req.items]
+    return await asyncio.to_thread(score_live_readings, items)

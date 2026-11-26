@@ -36,13 +36,16 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
-          cache-dependency-path: 'ai-service/requirements.txt'
+          cache-dependency-path: |
+            ai-service/requirements.txt
+            ai-service/requirements-experiments.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest flake8 httpx
+          pip install -r requirements-experiments.txt
+          pip install pytest flake8 httpx pytest-asyncio
 
       - name: Lint syntax with flake8
         run: |
@@ -50,6 +53,10 @@ jobs:
           flake8 src --count --select=E9,F63,F7,F82 --show-source --statistics
           # Additional warnings check with exit-zero (does not fail build for style)
           flake8 src --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Index Energy Knowledge Base (RAG)
+        run: |
+          python -m src.rag.ingest
 
       - name: Run Smoke & Unit Tests
         env:

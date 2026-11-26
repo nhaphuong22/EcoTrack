@@ -46,8 +46,8 @@ def test_export_demo_scenarios_structure(tmp_path):
 
     for scenario_path in [hvac_path, peak_path]:
         df = pd.read_csv(scenario_path)
-        # 1. Required columns
-        assert list(df.columns) == ["timestamp", "meter_reading", "air_temperature"]
+        # 1. Required columns (is_injected_anomaly added for Story 4.7 ground truth)
+        assert list(df.columns) == ["timestamp", "meter_reading", "air_temperature", "is_injected_anomaly"]
         # 2. Length check
         assert len(df) > 50
         # 3. No NaNs

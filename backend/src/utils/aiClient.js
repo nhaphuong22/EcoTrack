@@ -1,5 +1,4 @@
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
-const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || 'ecotrack_internal_secret_2026';
 
 class AIServiceError extends Error {
   constructor(message, status = 502, details = null) {
@@ -16,9 +15,10 @@ async function callAIService(path, options = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+  const internalApiKey = process.env.INTERNAL_API_KEY || '';
   const headers = {
     'Content-Type': 'application/json',
-    'X-Internal-Token': INTERNAL_API_KEY,
+    'X-Internal-Token': internalApiKey,
     ...(options.headers || {}),
   };
 

@@ -84,7 +84,7 @@ def generate_scenario_hvac_night_overrun(
     target_start_idx = None
     for i in range(24, len(df) - 10):
         ts = df.loc[i, "timestamp"]
-        if ts.dayofweek == 0 and ts.hour == 22:
+        if ts.day_of_week == 0 and ts.hour == 22:
             target_start_idx = i
             break
 
@@ -92,7 +92,7 @@ def generate_scenario_hvac_night_overrun(
     if target_start_idx is None:
         for i in range(24, len(df) - 10):
             ts = df.loc[i, "timestamp"]
-            if ts.dayofweek < 4 and ts.hour == 22:
+            if ts.day_of_week < 4 and ts.hour == 22:
                 target_start_idx = i
                 break
 
@@ -103,9 +103,11 @@ def generate_scenario_hvac_night_overrun(
     # Inject 8 consecutive hours of overnight overrun (22:00, 23:00, 00:00, 01:00, 02:00, 03:00, 04:00, 05:00)
     overrun_indices = list(range(target_start_idx, target_start_idx + 8))
 
+    df["is_injected_anomaly"] = False
     for idx in overrun_indices:
         jitter = float(np.random.normal(0, noise_std))
         df.loc[idx, "meter_reading"] = round(target_overrun_kwh + jitter, 2)
+        df.loc[idx, "is_injected_anomaly"] = True
 
     df["timestamp"] = df["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
     logger.info(
@@ -113,7 +115,7 @@ def generate_scenario_hvac_night_overrun(
         len(overrun_indices),
         df.loc[target_start_idx, "timestamp"],
     )
-    return df[["timestamp", "meter_reading", "air_temperature"]]
+    return df[["timestamp", "meter_reading", "air_temperature", "is_injected_anomaly"]]
 
 
 def generate_scenario_peak_hour_spike(
@@ -150,7 +152,7 @@ def generate_scenario_peak_hour_spike(
     target_day_idx = None
     for i in range(24, len(df) - 30):
         ts = df.loc[i, "timestamp"]
-        if ts.dayofweek == 1 and ts.hour == 0:  # Tuesday midnight start
+        if ts.day_of_week == 1 and ts.hour == 0:  # Tuesday midnight start
             target_day_idx = i
             break
 
@@ -162,9 +164,11 @@ def generate_scenario_peak_hour_spike(
     peak_offsets = [10, 11, 18, 19]
     spike_indices = [target_day_idx + offset for offset in peak_offsets if target_day_idx + offset < len(df)]
 
+    df["is_injected_anomaly"] = False
     for idx in spike_indices:
         jitter = float(np.random.normal(0, noise_std))
         df.loc[idx, "meter_reading"] = round(target_spike_kwh + jitter, 2)
+        df.loc[idx, "is_injected_anomaly"] = True
 
     df["timestamp"] = df["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
     logger.info(
@@ -172,7 +176,7 @@ def generate_scenario_peak_hour_spike(
         len(spike_indices),
         spike_indices,
     )
-    return df[["timestamp", "meter_reading", "air_temperature"]]
+    return df[["timestamp", "meter_reading", "air_temperature", "is_injected_anomaly"]]
 
 
 def export_demo_scenarios(

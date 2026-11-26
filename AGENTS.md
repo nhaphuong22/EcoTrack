@@ -1,5 +1,17 @@
 # Đội Ngũ Chuyên Viên AI (Specialized AI Agents Team) — EcoTrack
 
+## BMAD trong Codex
+
+- BMAD đã được cài tại `_bmad/`; các skill của Codex nằm tại `.agents/skills/bmad-*/SKILL.md`. Dùng bản cài trong dự án và đọc skill tương ứng trước khi thực hiện workflow.
+- Khi người dùng gọi `$bmad-help` hoặc hỏi cách dùng BMAD, dùng skill `bmad-help` và catalog `_bmad/_config/bmad-help.csv` để xác định bước phù hợp.
+- Với yêu cầu triển khai tính năng hoặc sửa lỗi đáng kể, dùng `bmad-build`; với thay đổi nhỏ về cấu hình, định dạng hoặc chính tả, xử lý trực tiếp. Khi người dùng yêu cầu một skill BMAD cụ thể, ưu tiên skill đó.
+- Các skill chuyên môn `agent-frontend`, `agent-backend`, `agent-ai-ml`, `agent-qa-tester` hỗ trợ công nghệ của EcoTrack; đọc khi phù hợp với phạm vi công việc.
+- Cấu hình BMAD được hợp nhất từ `_bmad/config.toml`, `_bmad/config.user.toml`, `_bmad/custom/config.toml`, `_bmad/custom/config.user.toml`. Chạy `uv run _bmad/scripts/resolve_config.py --project-root "C:/Users/ADMIN/Desktop/EcoTrack"` để đọc cấu hình hiệu lực.
+- Sửa cấu hình dùng chung tại `_bmad/custom/config.toml`; cấu hình cá nhân tại `_bmad/custom/config.user.toml`. Không sửa các file do installer quản lý.
+- Giao tiếp bằng tiếng Việt. Lưu tài liệu và kết quả workflow vào đường dẫn được resolver trả về trong `_bmad-output/`; tham khảo `docs/` theo nhu cầu của tác vụ.
+- Với skill yêu cầu render workflow, chạy đúng lệnh `render_skill.py` trong `SKILL.md`, đọc file `workflow.md` được trả về và tuân thủ hướng dẫn. Không thay bằng workflow của Claude hoặc bản BMAD khác.
+- Nếu skill không xuất hiện trong danh sách của Codex, mở phiên mới tại thư mục gốc EcoTrack. Hướng dẫn sử dụng: `BMAD-CODEX.md`.
+
 Dự án **EcoTrack** (Hệ thống quản trị năng lượng tòa nhà thông minh) được thiết lập với 5 Agent chuyên trách riêng biệt, được tối ưu hóa cho từng mảng công nghệ cụ thể trong dự án:
 
 ---

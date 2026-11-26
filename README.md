@@ -22,7 +22,7 @@ Mở terminal tại thư mục gốc `EcoTrack` và chạy 1 lệnh duy nhất:
 npm run install:all
 ```
 
-*(Lệnh này tự động cài đặt tuần tự: thư viện Express/Prisma cho `backend/`, thư viện React/Tailwind cho `frontend/`, và gói Python Machine Learning từ `ai-service/requirements.txt`)*.
+*(Lệnh này tự động cài đặt tuần tự: thư viện Express/Prisma cho `backend/`, thư viện React/Tailwind cho `frontend/`, và gói Python Machine Learning từ `ai-service/requirements.txt` cùng `ai-service/requirements-experiments.txt`; file thứ hai chứa PyTorch bản CPU và statsmodels cho benchmark, không được cài vào Docker image)*.
 
 ---
 
@@ -182,3 +182,9 @@ EcoTrack Monorepo
 | 📋 **PRD** | `_bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/prd.md` | Tài liệu đặc tả yêu cầu sản phẩm |
 | 🏛️ **Architecture Spine** | `_bmad-output/planning-artifacts/architecture/architecture-EcoTrack-2026-09-23/ARCHITECTURE-SPINE.md` | Thiết kế kiến trúc kỹ thuật hệ thống |
 | 🔧 **Technical Addendum** | `_bmad-output/planning-artifacts/prds/prd-EcoTrack-2026-09-23/addendum.md` | Phụ lục kỹ thuật và chuẩn tích hợp |
+
+
+#Simulator
+npm run simulate --prefix backend -- --backfill-hours 48
+
+npm run simulate --prefix backend -- --anomaly-zone z3

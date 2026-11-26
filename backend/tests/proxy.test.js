@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
-import app from '../src/app';
-import prisma from '../src/db';
+import app from './helpers/adminApp';
+const mockPrisma = { conversation: { createMany: vi.fn() } };
+global.__mockPrisma = mockPrisma;
 
 describe('Express Proxy Routes with Mocked Fetch', () => {
   const originalFetch = global.fetch;
@@ -9,7 +10,7 @@ describe('Express Proxy Routes with Mocked Fetch', () => {
   beforeEach(() => {
     // Clear cache before each test
     request(app).post('/api/v1/energy/cache/clear');
-    vi.spyOn(prisma.conversation, 'createMany').mockResolvedValue({ count: 2 });
+    mockPrisma.conversation.createMany.mockResolvedValue({ count: 2 });
   });
 
   afterEach(() => {
@@ -38,7 +39,7 @@ describe('Express Proxy Routes with Mocked Fetch', () => {
       expect.stringContaining('/internal/forecast/predict'),
       expect.objectContaining({
         headers: expect.objectContaining({
-          'X-Internal-Token': expect.any(String),
+          'X-Internal-Token': process.env.INTERNAL_API_KEY,
         }),
       })
     );

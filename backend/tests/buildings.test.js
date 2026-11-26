@@ -1,3 +1,4 @@
+import { meterMock } from './helpers/adminApp';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockBuilding1 = {
@@ -37,10 +38,12 @@ const mockPrisma = {
   },
 };
 
+mockPrisma.meter = meterMock;
+mockPrisma.$transaction = async (callback) => callback(mockPrisma);
 global.__mockPrisma = mockPrisma;
 
 import request from 'supertest';
-import app from '../src/app';
+import app from './helpers/adminApp';
 
 describe('CRUD Buildings & History Endpoints in Express Backend', () => {
   beforeEach(() => {

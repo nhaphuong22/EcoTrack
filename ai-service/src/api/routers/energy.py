@@ -1,65 +1,69 @@
 import asyncio
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Query
+from pydantic import BaseModel, Field
 
-from src.data_pipeline.bdg2_loader import data_loader
-from src.models.forecaster_xgboost import energy_forecaster
-from src.models.anomaly_isolation_forest import anomaly_detector
+from src.data_pipeline.serving_frame import (
+    compute_energy_metrics,
+    get_serving_frame,
+    score_timeseries_from_series,
+)
 
 router = APIRouter(prefix="/internal/energy", tags=["Energy Telemetry"])
 
 
+class SeriesPoint(BaseModel):
+    timestamp: str
+    meter_reading_kwh: float
+    outdoor_temperature_c: Optional[float] = None
+
+
+class TimeseriesRequest(BaseModel):
+    building_id: str = "office_tower_01"
+    recent_readings: List[SeriesPoint] = Field(..., min_length=25, max_length=720)
+
+
 def _compute_energy_metrics() -> Dict[str, Any]:
-    df = data_loader.get_or_create_data()
-    df_fc = energy_forecaster.predict_horizon(df)
-    df_anom = anomaly_detector.detect_anomalies(df_fc)
-
-    total_kwh = float(df_anom["meter_reading_kwh"].sum())
-    peak_kw = float(df_anom["meter_reading_kwh"].max())
-    baseline_kwh = float(df_anom["predicted_kwh"].sum())
-    anom_count = int(df_anom["is_anomaly"].sum())
-
-    waste_kwh = float(df_anom[df_anom["is_anomaly"]]["residual"].clip(lower=0).sum())
-    waste_vnd = waste_kwh * 3100
-    waste_usd = waste_kwh * 0.125
-
+    frame = get_serving_frame()
+    metrics = compute_energy_metrics(frame)
     return {
-        "building_id": "office_tower_01",
-        "total_consumption_kwh": round(total_kwh, 1),
-        "peak_demand_kw": round(peak_kw, 1),
-        "predicted_baseline_kwh": round(baseline_kwh, 1),
-        "total_anomalies_detected": anom_count,
-        "estimated_waste_cost_vnd": round(waste_vnd, 0),
-        "estimated_waste_cost_usd": round(waste_usd, 2),
+        "building_id": metrics["building_id"],
+        "total_consumption_kwh": metrics["total_consumption_kwh"],
+        "peak_demand_kw": metrics["peak_demand_kw"],
+        "predicted_baseline_kwh": metrics["predicted_baseline_kwh"],
+        "total_anomalies_detected": metrics["total_anomalies_detected"],
+        "estimated_waste_cost_vnd": metrics["estimated_waste_cost_vnd"],
+        "estimated_waste_cost_usd": metrics["estimated_waste_cost_usd"],
     }
 
 
-def _get_timeseries(limit: int) -> Dict[str, Any]:
-    df = data_loader.get_or_create_data()
-    df_fc = energy_forecaster.predict_horizon(df)
-    df_anom = anomaly_detector.detect_anomalies(df_fc)
-
-    df_slice = df_anom.tail(limit)
-    points = []
-    for _, row in df_slice.iterrows():
-        points.append({
+def _serialize_timeseries(df_slice, building_id: str = "office_tower_01") -> Dict[str, Any]:
+    points = [
+        {
             "timestamp": str(row["timestamp"]),
             "meter_reading_kwh": float(row["meter_reading_kwh"]),
             "predicted_kwh": float(row["predicted_kwh"]),
             "lower_bound_95": float(row["lower_bound_95"]),
             "upper_bound_95": float(row["upper_bound_95"]),
             "outdoor_temperature_c": float(row["outdoor_temperature_c"]),
-            "relative_humidity_pct": float(row.get("relative_humidity_pct", 65.0)),
+            "relative_humidity_pct": None,
             "is_anomaly": bool(row["is_anomaly"]),
             "anomaly_score": float(row["anomaly_score"]),
             "severity": str(row["severity"]),
-            "anomaly_reason": row.get("anomaly_reason") if bool(row["is_anomaly"]) else None,
-        })
+            "anomaly_reason": None,
+        }
+        for _, row in df_slice.iterrows()
+    ]
     return {
-        "building_id": "office_tower_01",
+        "building_id": building_id,
         "count": len(points),
         "data": points,
     }
+
+
+def _get_timeseries(limit: int) -> Dict[str, Any]:
+    frame = get_serving_frame()
+    return _serialize_timeseries(frame.tail(limit))
 
 
 @router.get("/metrics")
@@ -72,3 +76,12 @@ async def get_energy_metrics():
 async def get_timeseries(limit: int = Query(default=24, ge=1, le=720)):
     """Fetches real-time telemetry slice with predictions and anomaly flags."""
     return await asyncio.to_thread(_get_timeseries, limit)
+
+
+@router.post("/timeseries")
+async def post_timeseries(req: TimeseriesRequest, limit: int = Query(default=168, ge=1, le=720)):
+    """Scores live hourly DB readings through XGBoost and Isolation Forest."""
+    rows = [point.model_dump() for point in req.recent_readings]
+    return await asyncio.to_thread(
+        lambda: _serialize_timeseries(score_timeseries_from_series(rows, limit=limit), req.building_id)
+    )
