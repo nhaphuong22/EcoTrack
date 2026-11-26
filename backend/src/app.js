@@ -13,6 +13,7 @@ const copilotRouter = require('./routes/copilot');
 const ingestRouter = require('./routes/ingest');
 const streamRouter = require('./routes/stream');
 const mlopsRouter = require('./routes/mlops');
+const reportsRouter = require('./routes/reports');
 const healthRouter = require('./routes/health');
 const authRouter = require('./routes/auth');
 const portalRouter = require('./routes/portal');
@@ -68,6 +69,7 @@ app.use('/api/v1/anomalies', anomaliesRouter);
 app.use('/api/v1/copilot', copilotRouter);
 app.use('/api/v1/stream', streamRouter);
 app.use('/api/v1/mlops', mlopsRouter);
+app.use('/api/v1/reports', reportsRouter);
 
 // Global Error Handler
 app.use(errorHandler);

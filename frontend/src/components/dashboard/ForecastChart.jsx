@@ -12,6 +12,17 @@ import {
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
 
+const AnomalyDot = ({ cx, cy, payload }) => {
+  if (!payload?.is_anomaly || !Number.isFinite(cx) || !Number.isFinite(cy)) return null;
+
+  return (
+    <g className="anomaly-marker" aria-label={`Sự cố điện lúc ${payload.label}`}>
+      <circle className="anomaly-marker__halo" cx={cx} cy={cy} r={9} fill="#fb7185" />
+      <circle cx={cx} cy={cy} r={5} fill="#ef4444" stroke="#fecdd3" strokeWidth={2} />
+    </g>
+  );
+};
+
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   const actual     = payload.find(p => p.dataKey === 'meter_reading_kwh');
@@ -57,6 +68,11 @@ export default function ForecastChart({ timeSeries, forecast = [], loading }) {
     ...point, meter_reading_kwh: null, is_anomaly: false,
   }))].map(d => ({
     ...d,
+    // A two-value Area is a true band between the API-provided bounds.
+    confidence_interval_95:
+      Number.isFinite(d.lower_bound_95) && Number.isFinite(d.upper_bound_95)
+        ? [d.lower_bound_95, d.upper_bound_95]
+        : null,
     label: (() => {
       try { return format(parseISO(d.timestamp), 'MM/dd HH:mm'); }
       catch { return d.timestamp?.slice(5, 16) || ''; }
@@ -109,18 +125,14 @@ export default function ForecastChart({ timeSeries, forecast = [], loading }) {
 
           {/* 95% confidence band */}
           <Area
-            dataKey="upper_bound_95"
+            dataKey="confidence_interval_95"
+            type="monotone"
             stroke="none"
             fill="url(#confGrad)"
             legendType="none"
-            name="Upper 95%"
-          />
-          <Area
-            dataKey="lower_bound_95"
-            stroke="none"
-            fill="#fafcfb"
-            legendType="none"
-            name="Lower 95%"
+            name="Khoảng tin cậy 95%"
+            connectNulls
+            isAnimationActive={false}
           />
 
           {/* Predicted baseline */}
@@ -139,17 +151,7 @@ export default function ForecastChart({ timeSeries, forecast = [], loading }) {
             dataKey="meter_reading_kwh"
             stroke="#0c3a3e"
             strokeWidth={2.25}
-            dot={(props) => {
-              const { cx, cy, payload } = props;
-              if (!payload.is_anomaly) return null;
-              return (
-                <circle
-                  key={`dot-anom-${cx}-${cy}`}
-                  cx={cx} cy={cy} r={5}
-                  fill="#bd2630" stroke="#fafcfb" strokeWidth={2}
-                />
-              );
-            }}
+            dot={<AnomalyDot />}
             name="Thực tế"
             activeDot={{ r: 5, fill: '#0c3a3e' }}
           />

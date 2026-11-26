@@ -23,7 +23,13 @@ export default function CopilotDrawer({
   }, [messages, isLoading]);
 
   useEffect(() => {
-    if (isOpen) setTimeout(() => inputRef.current?.focus(), 120);
+    if (!isOpen) return undefined;
+    const focusTimer = setTimeout(() => {
+      inputRef.current?.focus();
+      const cursorPosition = inputRef.current?.value.length || 0;
+      inputRef.current?.setSelectionRange(cursorPosition, cursorPosition);
+    }, 320);
+    return () => clearTimeout(focusTimer);
   }, [isOpen]);
 
   const handleSend = () => {
@@ -49,6 +55,8 @@ export default function CopilotDrawer({
 
       {/* Drawer panel */}
       <aside
+        role="dialog"
+        aria-modal="true"
         aria-label="EcoTrack Copilot"
         className={`fixed right-0 top-0 z-40 flex h-full w-full flex-col border-l border-line-strong bg-ground shadow-[-24px_0_48px_-24px_rgba(14,30,29,0.35)] transition-transform duration-300 ease-out sm:w-[420px] lg:w-[480px] ${
           isOpen ? 'translate-x-0' : 'translate-x-full'

@@ -18,10 +18,14 @@ from src.data_pipeline.serving_frame import (
 
 # Ensure ai-service root is in sys.path so `src...` imports work from any working directory
 AI_SERVICE_DIR = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = AI_SERVICE_DIR.parent
 if str(AI_SERVICE_DIR) not in sys.path:
     sys.path.insert(0, str(AI_SERVICE_DIR))
 
-load_dotenv(AI_SERVICE_DIR / ".env")
+# Local development keeps shared service credentials in the project root.
+# An optional ai-service/.env may override them for service-specific settings.
+load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(AI_SERVICE_DIR / ".env", override=True)
 
 from src.api.routers import energy, forecast, anomalies, copilot, mlops
 from src.mlops.scheduler import start_scheduler, stop_scheduler
