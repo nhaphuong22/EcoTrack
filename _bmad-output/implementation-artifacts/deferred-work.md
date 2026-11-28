@@ -61,3 +61,12 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-13-forecast-with-learned-prediction-intervals.md`
   summary: Anomaly scoring and the time series now need the quantile artifact because `_score_feature_df` computes the band through the shared helper.
   evidence: Real but required by the acceptance criteria (the helper replaces all five band sites). A degraded path that scores anomalies without the band would limit the blast radius of a missing or corrupt artifact.
+
+## Deferred from: bmad-build review of what-if simulator (2026-11-28)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-what-if-simulator.md`
+  summary: The Copilot what-if tool simulates on the replay forecast (`predict_next_24h`), while the What-if tab uses the live series, so the two can quote different savings for the same scenario.
+  evidence: Real. The Copilot request carries no recent readings; matching the tab needs the gateway to pass the live series to the chat endpoint, a change to the chat contract.
+- source_spec: `_bmad-output/implementation-artifacts/spec-what-if-simulator.md`
+  summary: Unverified whether replay-path forecast timestamps are true UTC; if they are local building time, the 07:00–18:00 Vietnam cooling window shifts by 7 hours.
+  evidence: maybe-false. The live path uses database UTC timestamps. Settle by checking how the simulator time-aligns the replay frame to now.

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Sparkles, AlertCircle, LayoutDashboard, Map, Cpu, ArrowRight, FileBarChart } from 'lucide-react';
+import { Sparkles, AlertCircle, LayoutDashboard, Map, Cpu, ArrowRight, FileBarChart, FlaskConical } from 'lucide-react';
 import MLOpsPanel from './components/dashboard/MLOpsPanel';
 import { canViewMLOps } from './hooks/useMLOpsStatus';
 import Sidebar from './components/layout/Sidebar';
@@ -15,6 +15,7 @@ import { useCopilot } from './hooks/useCopilot';
 import { buildAnomalyPrompt, buildZonePrompt } from './lib/copilotPrompt';
 import { API_BASE_URL } from './services/api';
 import MonthlyReport from './components/reports/MonthlyReport';
+import WhatIfPanel from './components/dashboard/WhatIfPanel';
 
 export default function App({ user = null, onBackToPortal = null, onLogout = null }) {
   const showMLOps = canViewMLOps(user);
@@ -23,7 +24,7 @@ export default function App({ user = null, onBackToPortal = null, onLogout = nul
   const { messages, isLoading: copilotLoading, error: copilotError, sendMessage, stopStreaming, retry, clearHistory } = useCopilot();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'floorplan' | 'reports' | 'mlops'
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'floorplan' | 'reports' | 'whatif' | 'mlops'
 
   const handleAskCopilot = useCallback((anomaly) => {
     const prompt = buildAnomalyPrompt(anomaly);
@@ -66,6 +67,11 @@ export default function App({ user = null, onBackToPortal = null, onLogout = nul
       : activeTab === 'reports'
       ? {
           title: 'Báo cáo tháng',
+          badge: null,
+        }
+      : activeTab === 'whatif'
+      ? {
+          title: 'Mô phỏng What-if',
           badge: null,
         }
       : activeTab === 'mlops' && showMLOps
@@ -118,6 +124,20 @@ export default function App({ user = null, onBackToPortal = null, onLogout = nul
             <span className="flex items-center gap-2.5">
               <FileBarChart size={17} aria-hidden="true" />
               <span>Báo cáo tháng</span>
+            </span>
+          </button>
+
+          <button
+            id="tab-whatif"
+            role="tab"
+            type="button"
+            aria-selected={activeTab === 'whatif'}
+            onClick={() => setActiveTab('whatif')}
+            className={tabClass(activeTab === 'whatif')}
+          >
+            <span className="flex items-center gap-2.5">
+              <FlaskConical size={17} aria-hidden="true" />
+              <span>What-if</span>
             </span>
           </button>
 
@@ -212,6 +232,8 @@ export default function App({ user = null, onBackToPortal = null, onLogout = nul
             </>
           ) : activeTab === 'reports' ? (
             <MonthlyReport />
+          ) : activeTab === 'whatif' ? (
+            <WhatIfPanel />
           ) : activeTab === 'mlops' && showMLOps ? (
             <MLOpsPanel isAdmin={user?.role === 'ADMIN'} />
           ) : (

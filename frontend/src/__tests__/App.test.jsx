@@ -14,6 +14,7 @@ vi.mock('../services/api', () => ({
   sendCopilotMessage: vi.fn(),
   fetchMLOpsStatus: vi.fn(),
   triggerMLOpsRetrain: vi.fn(),
+  fetchWhatIf: vi.fn(),
 }));
 
 // Mock recharts ResponsiveContainer to avoid jsdom layout warning
@@ -403,5 +404,17 @@ describe('App - Story 4.12 MLOps tab gating', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Đăng xuất' }));
     expect(onLogout).toHaveBeenCalledTimes(1);
+  });
+
+  it('What-if tab renders the simulator panel', async () => {
+    api.fetchWhatIf.mockResolvedValue({
+      baseline: { kwh: 0, vnd: 0, co2_kg: 0 },
+      savings: { low: { kwh: 0, vnd: 0, co2_kg: 0 }, high: { kwh: 0, vnd: 0, co2_kg: 0 } },
+      hours: [], notes: [], assumptions: [],
+    });
+    render(<App />);
+    fireEvent.click(document.getElementById('tab-whatif'));
+    expect(await screen.findByRole('heading', { name: 'Mô phỏng tiết kiệm HVAC' })).toBeInTheDocument();
+    await waitFor(() => expect(api.fetchWhatIf).toHaveBeenCalled());
   });
 });

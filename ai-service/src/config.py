@@ -9,6 +9,10 @@ def get_tariff_rate_vnd() -> float:
 def get_tariff_rate_usd() -> float:
     return float(os.getenv("TARIFF_RATE_USD", "0.125"))
 
+def get_grid_emission_factor() -> float:
+    """tCO2/MWh; default = Vietnam grid factor 2022 (Department of Climate Change, MONRE)."""
+    return float(os.getenv("GRID_EMISSION_FACTOR_TCO2_PER_MWH", "0.6766"))
+
 def get_data_path() -> Path:
     val = os.getenv("ECOTRACK_DATA_PATH")
     return Path(val) if val else get_default_paths()[0]
