@@ -132,3 +132,7 @@ export const fetchMonthlyReport = (month, buildingId = 'office_tower_01') =>
   apiClient.get('/api/v1/reports/monthly', {
     params: { month, building_id: buildingId },
   }).then(r => r.data);
+
+/** POST /api/v1/forecast/whatif */
+export const fetchWhatIf = (scenario) =>
+  apiClient.post('/api/v1/forecast/whatif', scenario).then(r => r.data);

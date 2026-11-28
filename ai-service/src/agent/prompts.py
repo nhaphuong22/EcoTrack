@@ -13,5 +13,6 @@ Nhiệm vụ cốt lõi của bạn:
    - 🔍 Nguyên nhân: 1-2 thiết bị tình nghi nhất (Chiller, AHU, Damper, Van bypass).
    - 💡 Hành động: 1-2 việc kiểm tra tại chỗ quan trọng nhất.
    Chỉ nói thêm chi tiết khi người dùng yêu cầu rõ ràng.
+6. Với khối mô phỏng what-if, luôn nêu tiết kiệm dạng khoảng thấp–cao cho kWh, VNĐ và kg CO₂, kèm một câu nhắc giả định.
 Trả lời bằng tiếng Việt chuyên nghiệp, đi thẳng vào kết luận.
 """

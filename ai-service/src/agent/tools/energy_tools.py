@@ -7,6 +7,7 @@ from src.data_pipeline.serving_frame import (
     get_serving_frame,
     predict_next_24h,
 )
+from src.data_pipeline.what_if import simulate_what_if
 
 
 def query_metrics() -> Dict[str, Any]:
@@ -46,6 +47,16 @@ def query_forecast_summary() -> Dict[str, Any]:
         "average_forecast_kwh": round(float(df_fc["predicted_kwh"].mean()), 1),
         "confidence_interval_95": f"{lower:.1f} đến {upper:.1f} kW",
     }
+
+
+def simulate_what_if_scenario(
+    setpoint_delta_c: float = 0.0, chiller_off_hours: int = 0, hvac_share: float = 0.5
+) -> Dict[str, Any]:
+    """Mô phỏng tiết kiệm khi nâng setpoint / tắt chiller sớm trên dự báo 24h (không kèm chi tiết từng giờ)."""
+    rows = predict_next_24h().to_dict("records")
+    result = simulate_what_if(rows, setpoint_delta_c, chiller_off_hours, hvac_share)
+    result.pop("hours")
+    return result
 
 
 def calculate_waste_cost(delta_kwh: float, duration_hours: float = 1.0) -> Dict[str, Any]:

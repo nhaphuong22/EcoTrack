@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import logging
@@ -16,10 +17,34 @@ from src.agent.tools.energy_tools import (
     get_anomalies,
     query_forecast_summary,
     calculate_waste_cost,
+    simulate_what_if_scenario,
 )
+from src.data_pipeline.what_if import validate_scenario
 from src.agent.experiment_logger import experiment_logger
 
 logger = logging.getLogger("ecotrack.copilot")
+
+WHAT_IF_CUES = ("nếu", "giả sử", "what if")
+_HVAC_SUBJECT = r"(?:setpoint|nhiệt độ đặt|điều hoà|điều hòa|máy lạnh)"
+_SETPOINT_RE = re.compile(_HVAC_SUBJECT + r"\D{0,25}?(\d+(?:[.,]\d+)?)\s*(?:độ|°)")
+_CHILLER_OFF_RE = re.compile(r"(?:chiller|hvac|điều hoà|điều hòa|máy lạnh)\D{0,25}?sớm(?: hơn)?\D{0,10}?(\d+)\s*(?:giờ|tiếng|h\b)")
+WHAT_IF_RANGE_ERROR = (
+    "Giá trị ngoài phạm vi mô phỏng: nâng setpoint 0–2 °C theo bước 0.5 °C, tắt chiller sớm 0–3 giờ (số nguyên)."
+)
+
+
+def parse_what_if_args(msg_lower: str) -> Dict[str, Any] | None:
+    """Returns simulate_what_if_scenario kwargs when a conditional question names a setpoint or chiller-off number."""
+    if not any(cue in msg_lower for cue in WHAT_IF_CUES):
+        return None
+    args: Dict[str, Any] = {}
+    setpoint = _SETPOINT_RE.search(msg_lower)
+    if setpoint:
+        args["setpoint_delta_c"] = float(setpoint.group(1).replace(",", "."))
+    chiller_off = _CHILLER_OFF_RE.search(msg_lower)
+    if chiller_off:
+        args["chiller_off_hours"] = int(chiller_off.group(1))
+    return args or None
 
 
 class CopilotOrchestrator:
@@ -43,6 +68,7 @@ class CopilotOrchestrator:
             "forecast": None,
             "waste_cost": None,
             "knowledge": None,
+            "what_if": None,
         }
 
         # Check conversation history for follow-up context (Story 3.3)
@@ -106,6 +132,21 @@ class CopilotOrchestrator:
             except Exception as err:
                 logger.warning(f"[Copilot] Tool query_metrics failed: {err}")
 
+        # 4b. What-if savings simulation (conditional question with a parsed number)
+        what_if_args = parse_what_if_args(msg_lower)
+        if what_if_args:
+            try:
+                validate_scenario(what_if_args.get("setpoint_delta_c", 0.0), what_if_args.get("chiller_off_hours", 0), 0.5)
+            except ValueError:
+                tool_data["what_if"] = {"error": WHAT_IF_RANGE_ERROR}
+                what_if_args = None
+        if what_if_args:
+            try:
+                tool_data["what_if"] = simulate_what_if_scenario(**what_if_args)
+                tools_called.append("simulate_what_if")
+            except Exception as err:
+                logger.warning(f"[Copilot] Tool simulate_what_if failed: {err}")
+
         # 5. Domain Knowledge (RAG) - Story 3.2
         # Check if query is ONLY about live metrics (exclude knowledge retrieval)
         is_pure_live_metrics = is_metrics_query and not any(
@@ -153,6 +194,10 @@ class CopilotOrchestrator:
             context_parts.append(f"[Dữ liệu Tool get_anomalies]: {json.dumps(tool_data['anomalies'], ensure_ascii=False)}")
         if tool_data["forecast"]:
             context_parts.append(f"[Dữ liệu Tool query_forecast_summary]: {json.dumps(tool_data['forecast'], ensure_ascii=False)}")
+        if tool_data["what_if"] and "error" in tool_data["what_if"]:
+            context_parts.append(f"[Dữ liệu hệ thống — mô phỏng what-if 24h]: Không mô phỏng được. {tool_data['what_if']['error']}")
+        elif tool_data["what_if"] is not None:
+            context_parts.append(f"[Dữ liệu hệ thống — mô phỏng what-if 24h]: {json.dumps(tool_data['what_if'], ensure_ascii=False)}")
         if tool_data["knowledge"]:
             kb_str = "\n".join([f"- ({c.get('source', '')}) {c.get('title', '')}: {c.get('snippet', '')}" for c in tool_data["knowledge"]])
             context_parts.append(f"[Tài liệu tham khảo chuyên ngành (RAG)]:\n{kb_str}")
@@ -234,6 +279,7 @@ class CopilotOrchestrator:
                 tool_data["forecast"],
                 tool_data["knowledge"],
                 tools_called,
+                what_if=tool_data["what_if"],
             )
             engine = "heuristic"
 
@@ -340,6 +386,7 @@ class CopilotOrchestrator:
                 tool_data["forecast"],
                 tool_data["knowledge"],
                 tools_called,
+                what_if=tool_data["what_if"],
             )
             full_reply = heuristic_reply
             # Stream words/lines in small chunks for smooth typing effect (< 2.5s)
@@ -364,9 +411,27 @@ class CopilotOrchestrator:
         }
 
     def _generate_heuristic_response(
-        self, query: str, metrics, anomalies, forecast, knowledge, tools_called
+        self, query: str, metrics, anomalies, forecast, knowledge, tools_called, what_if=None
     ) -> Tuple[str, List[str]]:
         msg = query.lower()
+
+        # 0. What-if simulation response
+        if what_if and "error" in what_if:
+            return f"### 🧪 Mô phỏng what-if 24h tới\n\nKhông mô phỏng được. {what_if['error']}", tools_called
+        if what_if:
+            grid = next(a for a in what_if["assumptions"] if a["key"] == "grid_emission_factor")
+            lo, hi = what_if["savings"]["low"], what_if["savings"]["high"]
+            sc = what_if["scenario"]
+            notes = "".join(f"\n- {n}" for n in what_if.get("notes", []))
+            reply = f"""### 🧪 Mô phỏng what-if 24h tới
+
+- Kịch bản: nâng setpoint **+{sc['setpoint_delta_c']}°C**, tắt chiller sớm **{sc['chiller_off_hours']} giờ**, tỷ trọng HVAC {sc['hvac_share'] * 100:.0f}%.
+- ⚡ Tiết kiệm: **{lo['kwh']:,.1f} – {hi['kwh']:,.1f} kWh**
+- 💸 Chi phí: **{lo['vnd']:,.0f} – {hi['vnd']:,.0f} VNĐ**
+- 🌱 CO₂: **{lo['co2_kg']:,.1f} – {hi['co2_kg']:,.1f} kg**{notes}
+
+Giả định: 6–8%/°C theo qcvn_09_2017_hvac.md (hệ số của chiller, áp cho toàn HVAC nên có thể ước tính cao); hệ số phát thải lưới {grid['value']} tCO₂/MWh ({grid['source']})."""
+            return reply, tools_called
 
         # 1. Anomaly response
         if any(w in msg for w in ["bất thường", "sự cố", "chẩn đoán", "anom"]):
