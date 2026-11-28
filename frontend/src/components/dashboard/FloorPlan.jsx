@@ -109,7 +109,7 @@ export default function FloorPlan({ buildingId = 'office_tower_01', onAskCopilot
             <span className="chip chip-mute">Tầng 1</span>
           </div>
           <p className="meta mt-0.5">
-            Mô phỏng 10 khu vực làm việc • Cập nhật tự động qua luồng Server-Sent Events (SSE)
+            Theo dõi 10 khu vực làm việc • Cập nhật tự động theo thời gian thực
           </p>
         </div>
 
@@ -138,7 +138,7 @@ export default function FloorPlan({ buildingId = 'office_tower_01', onAskCopilot
           <div
             id="stream-connection-badge"
             className={`chip px-2.5 py-1.5 text-xs ${isConnected ? 'chip-ok' : 'chip-crit'}`}
-            title={isConnected ? 'Đang kết nối live stream' : 'Mất kết nối với SSE server'}
+            title={isConnected ? 'Đang nhận dữ liệu trực tiếp' : 'Mất kết nối dữ liệu trực tiếp'}
           >
             <Radio size={13} className={isConnected ? 'animate-pulse' : ''} aria-hidden="true" />
             <span>

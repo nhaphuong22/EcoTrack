@@ -4,7 +4,14 @@ import AccountPortal from '../AccountPortal';
 import { accountApi } from '../services/api';
 
 vi.mock('../services/api', () => ({ API_BASE_URL: 'http://localhost:5000', accountApi: { get: vi.fn(), post: vi.fn() } }));
-vi.mock('../App', () => ({ default: ({ user }) => <div data-role={user?.role}>Original system dashboard</div> }));
+vi.mock('../App', () => ({
+  default: ({ user, onBackToPortal }) => (
+    <div data-role={user?.role}>
+      Original system dashboard
+      {onBackToPortal && <button onClick={onBackToPortal}>Về cổng cư dân</button>}
+    </div>
+  ),
+}));
 const building = { id: 'office_tower_01', name: 'Demo Tower' };
 const household = { id: '11111111-1111-4111-8111-111111111111', name: 'My household', role: 'MEMBER',
   unit: { code: '101', building_id: building.id, building } };
@@ -20,6 +27,7 @@ class Source {
 }
 beforeEach(() => {
   vi.resetAllMocks(); currentUser = null; manageUnits = []; Source.instances = []; vi.stubGlobal('EventSource', Source);
+  window.history.replaceState({}, '', '/');
   accountApi.get.mockImplementation(async (path, options) => {
     if (path === '/api/v1/auth/me') {
       if (!currentUser) throw signedOut;
@@ -95,9 +103,22 @@ describe('Resident account portal', () => {
     render(<AccountPortal />);
     fireEvent.click(await screen.findByRole('button', { name: 'Dashboard hệ thống' }));
     expect(await screen.findByText('Original system dashboard')).toHaveAttribute('data-role', 'ADMIN'); // user reaches the dashboard
+    expect(window.location.pathname).toBe('/dashboard');
     fireEvent.click(screen.getByRole('button', { name: 'Về cổng cư dân' }));
     expect(await screen.findByRole('button', { name: 'Dashboard hệ thống' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/');
     expect(screen.queryByText('Original system dashboard')).not.toBeInTheDocument();
+  });
+
+  it('opens a bookmarked dashboard URL and follows browser navigation', async () => {
+    currentUser = { ...resident, households: [], is_platform_admin: true, role: 'ADMIN' };
+    window.history.replaceState({}, '', '/dashboard');
+    render(<AccountPortal />);
+    expect(await screen.findByText('Original system dashboard')).toBeInTheDocument();
+
+    window.history.pushState({}, '', '/');
+    fireEvent(window, new PopStateEvent('popstate'));
+    expect(await screen.findByRole('button', { name: 'Dashboard hệ thống' })).toBeInTheDocument();
   });
 
   it('lets building staff (TECHNICIAN) open the operations dashboard', async () => {
@@ -192,5 +213,39 @@ describe('Resident account portal', () => {
     await waitFor(() => expect(accountApi.post).toHaveBeenCalledWith('/api/v1/portal/invitations',
       { household_id: household.id, email: 'failed@example.test', role: 'OWNER' }));
     expect(await screen.findByText(/Mã mời trước đó đã bị vô hiệu/)).toBeInTheDocument();
+  });
+
+  it('uses a single unified header and supports switching between anomalies and recent history tabs', async () => {
+    currentUser = resident;
+    accountApi.get.mockImplementation(async (path, options) => {
+      if (path === '/api/v1/auth/me') return { data: { user: currentUser } };
+      if (path === '/api/v1/portal/buildings') return { data: { buildings: [building] } };
+      if (path === '/api/v1/portal/zones') return { data: { zones: [] } };
+      if (path === '/api/v1/portal/overview') {
+        return {
+          data: {
+            count: 2,
+            data: [
+              { timestamp: '2026-11-27T00:00:00Z', meter_reading_kwh: 12.5 },
+              { timestamp: '2026-11-27T01:00:00Z', meter_reading_kwh: 14.0 },
+            ],
+            anomalies: [
+              { id: 'a1', timestamp: '2026-11-27T01:00:00Z', severity: 'Medium', delta_kwh: 3.5, subsystem: 'Điều hòa phòng khách' },
+            ],
+            metrics: { total_consumption_kwh: options.params.scope === 'household' ? 26.5 : 100 },
+          },
+        };
+      }
+      throw new Error(`Unexpected path ${path}`);
+    });
+
+    render(<AccountPortal />);
+    expect(await screen.findByText('26.50 kWh')).toBeInTheDocument();
+    expect(screen.getAllByRole('banner')).toHaveLength(1);
+    expect(screen.getByText('Điều hòa phòng khách')).toBeInTheDocument();
+    expect(screen.getByText('Trung bình')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /Lịch sử gần nhất/ }));
+    expect(await screen.findByText('14.00 kWh')).toBeInTheDocument();
   });
 });
